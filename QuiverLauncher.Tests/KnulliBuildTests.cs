@@ -101,11 +101,13 @@ public sealed class KnulliBuildTests : IDisposable
                 Digest = "sha256:" + (corruptDigest ? new string('0', 64) :
                     Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant())
             });
-            var game = new GameInfo { Name = "2048", Repository = Recipe.Repository, FolderName = "2048" };
+            using var manager = new GameManager(httpClient: client);
+            var game = new GameInfo { Name = "2048", Repository = Recipe.Repository, FolderName = "2048", GameManager = manager };
             var dialogs = new TestDialogs();
             await GameDownloadInstallService.DownloadAndInstallAsync(game, client,
                 Path.Combine(_state, "Apps"), Recipe.Release,
-                new AppSettings { GitHubApiToken = "test-token" }, GameStatus.NotInstalled, dialogs);
+                new AppSettings { GitHubApiToken = "test-token" }, GameStatus.NotInstalled, dialogs)
+                .WaitAsync(TimeSpan.FromSeconds(10));
             var versionPath = Path.Combine(_state, "Apps", "2048", "version.txt");
             if (corruptDigest)
             {
@@ -172,6 +174,17 @@ public sealed class KnulliBuildTests : IDisposable
         await service.Invoking(s => s.BuildAsync(Recipe)).Should().ThrowAsync<InvalidOperationException>()
             .WithMessage($"*{conclusion}*");
         Directory.GetFiles(_state).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Packaging_revision_invalidates_cached_artifacts()
+    {
+        var handler = new BuildHandler();
+        using var client = new HttpClient(handler);
+        await new KnulliBuildService(client, Configuration, "test-token", _state).BuildAsync(Recipe);
+        await new KnulliBuildService(client, Configuration with { BuildRevision = 2 }, "test-token", _state)
+            .BuildAsync(Recipe);
+        handler.Dispatches.Should().Be(2);
     }
 
     [Fact]

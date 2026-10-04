@@ -77,6 +77,12 @@ The initial supported recipe is:
 | --- | --- | --- |
 | `2048` | `libretro/libretro-2048`, pinned to a full Git commit | Knulli's installed RetroArch |
 
+2048 uses a per-game RetroArch input overlay with standardized SDL2
+GameController indices and Knulli's active mapping, avoiding stale controller
+indices or core-specific input devices from a previously played emulator.
+Press **Start** at the title screen; **Menu/Hotkey + Start** exits back to Quiver.
+Global RetroArch settings are not modified.
+
 Add an app named `2048` with repository `libretro/libretro-2048` and folder name
 `2048` to the library. When Download finds no native ARM64 asset, Quiver:
 
@@ -96,6 +102,8 @@ an x64 GitHub runner, with the H700 flags from Knulli's `configs/knulli-h700.boa
 with the resulting core. No commercial game data is bundled.
 
 Completed requests reuse their artifact until its 30-day retention expires.
+Increment `BuildRevision` when changing build flags or packaging on a moving
+workflow branch, so an older cached artifact is not reused for the same source.
 An expired artifact or failed run is reported; retrying starts a fresh build.
 Closing Quiver cancels local waiting, not the remote GitHub job. Reopening and
 retrying resumes that request.

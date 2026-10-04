@@ -417,10 +417,13 @@ public static class GameDownloadInstallService
 
             if (game.GameManager != null)
             {
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                {
+                if (Avalonia.Application.Current?.ApplicationLifetime is null)
                     game.GameManager.OnPropertyChanged(nameof(GameManager.Games));
-                });
+                else
+                    await Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        game.GameManager.OnPropertyChanged(nameof(GameManager.Games));
+                    });
             }
         }
         catch (HttpRequestException ex)

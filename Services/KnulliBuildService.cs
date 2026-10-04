@@ -16,7 +16,7 @@ public sealed record KnulliBuildRecipe(string Id, string Repository, string Sour
 }
 
 public sealed record KnulliBuildConfiguration(string Repository, string Ref, KnulliBuildRecipe[] Recipes,
-    bool AttemptUnconfiguredGames = false)
+    bool AttemptUnconfiguredGames = false, int BuildRevision = 1)
 {
     public static bool IsRepository(string? value) => Regex.IsMatch(value ?? "",
         @"\A[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*\z");
@@ -24,7 +24,7 @@ public sealed record KnulliBuildConfiguration(string Repository, string Ref, Knu
     public void Validate()
     {
         if (!IsRepository(Repository) ||
-            string.IsNullOrWhiteSpace(Ref) || Recipes is null)
+            string.IsNullOrWhiteSpace(Ref) || Recipes is null || BuildRevision < 1)
             throw new InvalidDataException("Invalid Knulli build repository, ref, or recipes.");
         foreach (var recipe in Recipes)
         {
@@ -104,7 +104,7 @@ public sealed class KnulliBuildService(HttpClient httpClient, KnulliBuildConfigu
             }
             Directory.CreateDirectory(stateDirectory);
             var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-                $"{configuration.Repository}\n{configuration.Ref}\n{recipe.Id}\n{recipe.Repository}\n{recipe.SourceRef}")));
+                $"{configuration.Repository}\n{configuration.Ref}\n{configuration.BuildRevision}\n{recipe.Id}\n{recipe.Repository}\n{recipe.SourceRef}")));
             var statePath = Path.Combine(stateDirectory, key + ".json");
             PendingBuild pending;
             if (File.Exists(statePath))
