@@ -1,0 +1,10 @@
+{
+  "apps": [
+    {
+      "name": "2048",
+      "repository": "libretro/libretro-2048",
+      "folderName": "2048",
+      "tags": ["Knulli", "Puzzle"]
+    }
+  ]
+}

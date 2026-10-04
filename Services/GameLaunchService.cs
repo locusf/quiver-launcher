@@ -141,7 +141,7 @@ public static class GameLaunchService
                 ? gamePath
                 : (Path.GetDirectoryName(executablePath) ?? gamePath));
 
-            if (KnulliRuntime.IsEnabled)
+            if (KnulliRuntime.HasFramebufferHost)
             {
                 await KnulliRuntime.HandOffAsync(startInfo);
                 return true;

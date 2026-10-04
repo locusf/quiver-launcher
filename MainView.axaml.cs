@@ -86,7 +86,8 @@ namespace QuiverLauncher
         public AndroidLauncherUpdater? AndroidUpdates => AndroidLauncherUpdater.Current;
         public IBrush WindowBackground => this.Resources["ThemeDarker"] as IBrush ?? Brushes.Transparent;
         public bool IsDesktopPlatform => !PlatformCapabilities.IsMobile;
-        public bool ShowMinimizeButton => IsDesktopPlatform && !SteamDeckEnvironment.IsGamingMode();
+        public bool ShowWindowControls => IsDesktopPlatform && !KnulliRuntime.IsEnabled;
+        public bool ShowMinimizeButton => ShowWindowControls && !SteamDeckEnvironment.IsGamingMode();
         public string MaximizeButtonTip => GetHostWindowState()is WindowState.Maximized or WindowState.FullScreen ? "Restore" : "Maximize";
         public bool IsMobile => PlatformCapabilities.IsMobile;
 
@@ -134,7 +135,13 @@ namespace QuiverLauncher
                 HostWindow.WindowState = state;
         }
 
-        private void CloseHost() => HostWindow?.Close();
+        private void CloseHost()
+        {
+            if (KnulliRuntime.IsEnabled)
+                RequestExit();
+            else
+                HostWindow?.Close();
+        }
         private Avalonia.Platform.Storage.IStorageProvider StorageProvider => TopLevel.GetTopLevel(this)?.StorageProvider ?? throw new InvalidOperationException("Storage provider is not available.");
 
         public MainView() : this(new MainViewDependencies())
@@ -198,7 +205,7 @@ namespace QuiverLauncher
             ChangelogPanel.ConfigureRenderer(_markdownRenderer);
             ChangelogPanel.CloseRequested += CloseChangelog;
             if (MinimizeButton != null)
-                MinimizeButton.IsVisible = !SteamDeckEnvironment.IsGamingMode();
+                MinimizeButton.IsVisible = ShowMinimizeButton;
             try
             {
                 _settings = _settingsViewModel.Load();

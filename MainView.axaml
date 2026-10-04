@@ -561,7 +561,7 @@
 									Width="28"
 									Margin="8,0,0,0"
 									ClickMode="Press"
-									IsVisible="{Binding IsDesktopPlatform}"
+									IsVisible="{Binding ShowWindowControls}"
 									ToolTip.Tip="{Binding MaximizeButtonTip}"
 									Click="ToggleMaximize_Click">
 								<Image Width="28"

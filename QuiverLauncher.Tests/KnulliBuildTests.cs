@@ -26,6 +26,23 @@ public sealed class KnulliBuildTests : IDisposable
         KnulliAssetPolicy.IsCompatible(name).Should().Be(expected);
 
     [Fact]
+    public void Handoff_preserves_argument_boundaries_without_build_credentials()
+    {
+        var start = new System.Diagnostics.ProcessStartInfo("/games/My Game/launch.sh")
+        {
+            UseShellExecute = false,
+            WorkingDirectory = "/games/My Game"
+        };
+        start.ArgumentList.Add("one argument");
+        start.Environment["QUIVER_GITHUB_TOKEN"] = "private-token";
+        start.Environment["QUIVER_KNULLI"] = "1";
+        var request = KnulliRuntime.CreateLaunchRequest(start);
+        request.Arguments.Should().Equal("one argument");
+        request.Environment.Should().NotContainKey("QUIVER_GITHUB_TOKEN");
+        request.Environment.Should().NotContainKey("QUIVER_KNULLI");
+    }
+
+    [Fact]
     public async Task Dispatch_is_correlated_and_successful_artifact_is_reused()
     {
         var handler = new BuildHandler();
