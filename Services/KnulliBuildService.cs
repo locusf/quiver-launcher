@@ -38,7 +38,7 @@ public sealed record KnulliBuildConfiguration(string Repository, string Ref, Knu
 public sealed record KnulliBuildArtifact(string Url, string Sha256, string SourceRef);
 
 public sealed class KnulliBuildService(HttpClient httpClient, KnulliBuildConfiguration configuration,
-    string token, string stateDirectory)
+    string token, string stateDirectory, Func<CancellationToken, Task<string>>? collectDeviceProfile = null)
 {
     private static readonly SemaphoreSlim BuildLock = new(1, 1);
     private sealed record PendingBuild(string RequestId, DateTimeOffset CreatedAt);
@@ -88,6 +88,9 @@ public sealed class KnulliBuildService(HttpClient httpClient, KnulliBuildConfigu
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromMinutes(45));
             var ct = timeout.Token;
+            var deviceProfile = automatic
+                ? KnulliDeviceProfile.Validate(await (collectDeviceProfile ?? KnulliDeviceProfile.CollectAsync)(ct))
+                : "";
             if (automatic)
             {
                 using var sourceRequest = new HttpRequestMessage(HttpMethod.Get,
@@ -104,7 +107,7 @@ public sealed class KnulliBuildService(HttpClient httpClient, KnulliBuildConfigu
             }
             Directory.CreateDirectory(stateDirectory);
             var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-                $"{configuration.Repository}\n{configuration.Ref}\n{configuration.BuildRevision}\n{recipe.Id}\n{recipe.Repository}\n{recipe.SourceRef}")));
+                $"{configuration.Repository}\n{configuration.Ref}\n{configuration.BuildRevision}\n{recipe.Id}\n{recipe.Repository}\n{recipe.SourceRef}\n{deviceProfile}")));
             var statePath = Path.Combine(stateDirectory, key + ".json");
             PendingBuild pending;
             if (File.Exists(statePath))
@@ -118,7 +121,8 @@ public sealed class KnulliBuildService(HttpClient httpClient, KnulliBuildConfigu
                 {
                     @ref = configuration.Ref,
                     inputs = new { recipe = recipe.Id, source_ref = recipe.SourceRef,
-                        source_repository = recipe.Repository, request_id = pending.RequestId }
+                        source_repository = recipe.Repository, request_id = pending.RequestId,
+                        target_profile = deviceProfile }
                 });
                 using var response = await httpClient.SendAsync(request, ct);
                 response.EnsureSuccessStatusCode();

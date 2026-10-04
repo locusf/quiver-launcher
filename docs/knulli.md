@@ -14,6 +14,7 @@ dotnet publish QuiverLauncher.Desktop/QuiverLauncher.Desktop.csproj \
   -c Release -r linux-arm64 --self-contained true -p:PublishTrimmed=false \
   -o artifacts/knulli/quiver-launcher
 cp tools/knulli/supervisor.py artifacts/knulli/quiver-launcher/
+cp tools/knulli/device_profile.py artifacts/knulli/quiver-launcher/
 cp 'tools/knulli/Quiver Launcher.sh' artifacts/knulli/
 chmod +x 'artifacts/knulli/Quiver Launcher.sh' \
   artifacts/knulli/quiver-launcher/QuiverLauncher.Desktop
@@ -61,7 +62,7 @@ branch before GitHub permits dispatch.
 
 The example enables `AttemptUnconfiguredGames`. Set it to `false` to permit only
 explicit recipes. With it enabled, other GitHub games automatically get a
-best-effort cross-build attempt when they have no native ARM64 download.
+reasoning-agent build attempt when they have no native ARM64 download.
 
 Configure a fine-grained GitHub token restricted to that repository with
 **Actions: read and write** and **Contents: read**. Put it in **Settings >
@@ -108,36 +109,72 @@ An expired artifact or failed run is reported; retrying starts a fresh build.
 Closing Quiver cancels local waiting, not the remote GitHub job. Reopening and
 retrying resumes that request.
 
-## Best-effort builds without recipes
+## Agentic builds without recipes
 
 For an unconfigured GitHub game, Quiver resolves the selected release tag
 (or `HEAD` for projects without releases) to a full commit, then dispatches the
-`auto` job. The generic builder tries CMake, Meson, Autotools/configure, or Make.
-It uses ARM64 compilers and common SDL2, OpenGL/EGL, image, audio, and compression
-development libraries. Projects with a single nested CMake project are supported.
+`auto` job. A **Copilot SDK reasoning agent** replaces the old fixed build-system
+script. GitHub Actions is only the compute/dispatch/artifact transport, not the
+build decision maker; this is not a self-hosted agent server.
+
+Configure the repository secret **`COPILOT_GITHUB_TOKEN`** with a credential
+authorized for Copilot, separate from the device's Actions token. The account
+must have access to the configured model (`gpt-5.4`, high reasoning effort).
+Agent runs may consume Copilot usage. A missing/unauthorized credential fails
+explicitly; there is no silent fallback to the old scripted builder. The pinned
+SDK and its verified runtime are installed only on the runner, not on Knulli.
+
+The agent can:
+
+1. List, search, and read the pinned game's source using constrained tools.
+2. Inspect the handheld's observed graphics libraries, framebuffer, architecture,
+   SDL joystick/button/axis counts, and SDL controller mapping.
+3. Infer build flags, input APIs, packaging and necessary source adaptations.
+4. Compile in isolation, read the actual errors, and revise its recipe.
+5. Publish only after an ARM64 ELF entrypoint and portable package pass checks.
+
+The loop permits five build attempts, six minutes per compiler run, 60 tool calls,
+and 35 minutes of agent time inside the 40-minute job. It starts with ARM64
+compilers and common SDL2, OpenGL/EGL, image, audio, and compression libraries.
+Missing dependencies can still require updating the toolchain; the agent cannot
+install arbitrary network dependencies from within a source build.
 
 The source build runs as an unprivileged user in a disposable container with no
 network, GitHub credentials, Docker socket, or host filesystem access beyond its
-read-only source and output directory. CPU, memory, process count, and job time
+read-only source, read-only proposed recipe and output directory. CPU, memory, process count, and job time
 are limited. Submodules are fetched before the isolated build. Build systems
 that download more dependencies during compilation will fail with a log rather
 than receive unrestricted network access.
 
-Packaging uses the project's install target, checks that there is exactly one
-ARM64 executable (not an x64 tool or shared library), preserves installed data,
-copies top-level license notices, and generates a portable launch script.
-Ambiguous executables, missing install rules, dependencies, or compiler errors
-are reported in Actions, with a `knulli-auto-report-<request-id>` artifact. A
-successful compile is **not** a guarantee of runtime compatibility: graphics,
-dynamic libraries, hard-coded paths and game data still need device testing.
-The build log explicitly makes that distinction.
+The Copilot session exposes no built-in shell, filesystem, MCP, SSH or subagent
+tools. Repository instructions are not loaded. Only the custom bounded tools
+can inspect source or invoke the container. Game code receives no AI/GitHub token.
+Recipe inputs and runner logs are outside the container's writable output mount.
+Special files and symlinks in generated packages are rejected.
+
+The installed package includes `quiver-agent-report.json` (build choices,
+controller analysis, exact source citations and limitations) and
+`quiver-build-recipe.txt` (the successful reproducible recipe). Complete attempt
+logs are available in `knulli-auto-report-<request-id>`. Controller analysis must
+identify native/adapted/unsupported input, distinguish normalized SDL
+GameController indices from physical Joystick indices, and cite actual source
+lines. It must never label compilation as device or controller verification.
+Both `runtime_verified` fields are enforced as `false` until separate device
+testing occurs.
+
+`device_profile.py` reads hardware metadata and the current Knulli SDL mapping
+database, not button events or arbitrary environment variables. It exports no
+tokens, network addresses, usernames or user files. Hardware/input profiles are
+included in the build cache key so a build for another controller is not silently
+reused. Unknown mappings are reported as unknown, never guessed. Physical button
+calibration and live on-device gameplay testing remain separate tasks.
 
 ## Limits
 
 - Unconfigured GitHub games are attempted, not guaranteed. Unsupported build
-  systems, Rust/.NET engines, private repositories, GitLab sources and commercial
-  game data need further integration or a specific recipe. Improve the generic
-  builder or add a reviewed recipe based on its failure report.
+  systems, Rust/.NET toolchains, private repositories, GitLab sources and commercial
+  game data can need further integration or a specific recipe. Use the agent's
+  failure report to improve the available toolchain or supply a reviewed recipe.
 - A Linux ARM64 archive is a candidate, not proof of framebuffer compatibility.
   Games requiring X11/Wayland or a different GPU stack still need a port.
 - Windows, generic architecture-unknown Linux, AppImage, and Flatpak downloads

@@ -15,6 +15,7 @@ public sealed class KnulliBuildTests : IDisposable
     private readonly string _state = Path.Combine(Path.GetTempPath(), "QuiverKnulliTests", Guid.NewGuid().ToString("N"));
     private static readonly KnulliBuildRecipe Recipe = new("2048", "libretro/libretro-2048", new string('a', 40));
     private static readonly KnulliBuildConfiguration Configuration = new("owner/builds", "build-branch", [Recipe]);
+    private const string DeviceProfile = """{"schema":1,"architecture":"aarch64","display":{"framebuffer":true},"controllers":[]}""";
 
     [Theory]
     [InlineData("game-knulli-arm64.zip", true)]
@@ -35,12 +36,35 @@ public sealed class KnulliBuildTests : IDisposable
         var handler = new BuildHandler { RecipeId = "auto" };
         using var client = new HttpClient(handler);
         var service = new KnulliBuildService(client,
-            Configuration with { AttemptUnconfiguredGames = true }, "test-token", _state);
+            Configuration with { AttemptUnconfiguredGames = true }, "test-token", _state,
+            _ => Task.FromResult(DeviceProfile));
         var artifact = await service.BuildAsync(new KnulliBuildRecipe("auto", "owner/game", "v1.2"));
         artifact.SourceRef.Should().Be(new string('c', 40));
         handler.SourceRef.Should().Be(artifact.SourceRef);
         handler.SourceRepository.Should().Be("owner/game");
+        handler.TargetProfile.Should().Be(DeviceProfile);
     }
+
+    [Fact]
+    public async Task Device_input_changes_invalidate_agent_build_cache()
+    {
+        var handler = new BuildHandler { RecipeId = "auto" };
+        using var client = new HttpClient(handler);
+        var config = Configuration with { AttemptUnconfiguredGames = true };
+        var source = new KnulliBuildRecipe("auto", "owner/game", "v1.2");
+        await new KnulliBuildService(client, config, "test-token", _state,
+            _ => Task.FromResult(DeviceProfile)).BuildAsync(source);
+        await new KnulliBuildService(client, config, "test-token", _state,
+            _ => Task.FromResult(DeviceProfile.Replace("[]", """[{"name":"different pad"}]"""))).BuildAsync(source);
+        handler.Dispatches.Should().Be(2);
+    }
+
+    [Theory]
+    [InlineData("""{"schema":2,"architecture":"aarch64","display":{},"controllers":[]}""")]
+    [InlineData("""{"schema":1,"architecture":"x86_64","display":{},"controllers":[]}""")]
+    [InlineData("""{"schema":1,"architecture":"aarch64","display":{},"controllers":{}}""")]
+    public void Invalid_hardware_profiles_are_not_dispatched(string profile) =>
+        FluentActions.Invoking(() => KnulliDeviceProfile.Validate(profile)).Should().Throw<InvalidDataException>();
 
     [Fact]
     public async Task Generic_attempt_is_opt_in()
@@ -275,6 +299,7 @@ public sealed class KnulliBuildTests : IDisposable
         public string? DispatchedRef { get; private set; }
         public string? SourceRef { get; private set; }
         public string? SourceRepository { get; private set; }
+        public string? TargetProfile { get; private set; }
         public string RecipeId { get; init; } = "2048";
         public string Conclusion { get; init; } = "success";
         public bool Expired { get; init; }
@@ -297,6 +322,7 @@ public sealed class KnulliBuildTests : IDisposable
                 DispatchedRef = body.GetProperty("ref").GetString();
                 SourceRef = body.GetProperty("inputs").GetProperty("source_ref").GetString();
                 SourceRepository = body.GetProperty("inputs").GetProperty("source_repository").GetString();
+                TargetProfile = body.GetProperty("inputs").GetProperty("target_profile").GetString();
                 _requestId = body.GetProperty("inputs").GetProperty("request_id").GetString();
                 Dispatches++;
                 return new HttpResponseMessage(DispatchStatus);
