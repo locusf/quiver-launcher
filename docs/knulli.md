@@ -180,6 +180,8 @@ symlink paths and license notices cannot be changed. Source changes invalidate
 any previous compile validation. Temporary edits made only inside a build
 container are not source fixes; reusable build flags and packaging remain in the
 saved recipe.
+Submodule source edits require a separate explicit fork and are rejected rather
+than silently omitted from the parent project's checkpoint.
 
 The reserved `.quiver-agent/knulli/` directory records checkpoint status, the
 original source commit, device fingerprint, last errors and recipe. A checkpoint

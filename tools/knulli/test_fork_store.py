@@ -145,6 +145,13 @@ class ForkStoreTests(unittest.TestCase):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 forks.validate_source_edit(self.source, path)
 
+    def test_submodule_edits_are_rejected_before_a_parent_checkpoint_can_lose_them(self):
+        submodule = self.source / "thirdparty" / "library"
+        submodule.mkdir(parents=True)
+        (submodule / ".git").write_text("gitdir: ../../.git/modules/library\n")
+        with self.assertRaisesRegex(ValueError, "separate fork"):
+            forks.validate_source_edit(self.source, "thirdparty/library/source.c")
+
 
 if __name__ == "__main__":
     unittest.main()

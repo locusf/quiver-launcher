@@ -32,6 +32,8 @@ def validate_source_edit(root, relative):
         current /= part
         if current.is_symlink():
             raise ValueError("Source edits cannot traverse symlinks.")
+        if current.is_dir() and (current / ".git").exists():
+            raise ValueError("Submodule source edits require a separate fork; they cannot be checkpointed in the parent.")
     if not path.resolve().is_relative_to(root.resolve()):
         raise ValueError("Source edit escapes the checkout or targets a symlink.")
     return path
