@@ -138,6 +138,11 @@ class BuildAgent:
     def record(self, kind, **details):
         with (self.output / "agent-report.jsonl").open("a") as stream:
             stream.write(json.dumps({"event": kind, **details}) + "\n")
+        if kind in ("reasoning_turn", "reasoning_resume", "build_attempt", "tool_error", "completed"):
+            status = {key: details[key] for key in (
+                "turn", "after_turn", "attempt", "success", "error", "attempts_used",
+                "tool_calls_used", "attempts_remaining", "tool_calls_remaining") if key in details}
+            print(f"[agent] {kind}: {json.dumps(status)}", flush=True)
 
     def count_call(self):
         self.calls += 1
