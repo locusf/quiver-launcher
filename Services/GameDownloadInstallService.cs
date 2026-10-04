@@ -387,6 +387,12 @@ public static class GameDownloadInstallService
                 game.DownloadProgress = 0;
                 game.ClearDownloadSelection();
                 game.AvailableDownloads = null;
+                if (buildArtifact != null && build?.Recipe.Id == "auto")
+                {
+                    var reportPath = Path.Combine(gamePath, "quiver-agent-report.json");
+                    var report = await File.ReadAllTextAsync(reportPath).ConfigureAwait(false);
+                    await dialogs.ShowBuildReportAsync(KnulliBuildService.DescribeAgentResult(report, reportPath));
+                }
             }
             finally
             {

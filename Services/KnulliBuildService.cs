@@ -43,6 +43,22 @@ public sealed class KnulliBuildService(HttpClient httpClient, KnulliBuildConfigu
     private static readonly SemaphoreSlim BuildLock = new(1, 1);
     private sealed record PendingBuild(string RequestId, DateTimeOffset CreatedAt);
 
+    public static string DescribeAgentResult(string json, string reportPath)
+    {
+        using var document = JsonDocument.Parse(json);
+        var controller = document.RootElement.GetProperty("controller");
+        var support = controller.GetProperty("support").GetString();
+        if (support is not ("native" or "adapted" or "unsupported"))
+            throw new InvalidDataException("The agent build report has an invalid controller-support assessment.");
+        var notes = controller.GetProperty("notes").GetString() ?? "";
+        if (notes.Length > 800)
+            notes = notes[..800] + "...";
+        return $"Source build completed. Controller support: {support} (agent assessment).\n\n" +
+            $"{notes}\n\nGameplay and controller operation are not verified on the device. " +
+            "An unsupported assessment means further input adaptation is needed.\n\n" +
+            $"Full source evidence and build report: {reportPath}";
+    }
+
     public static (KnulliBuildService Service, KnulliBuildRecipe Recipe)? ForGame(
         GameInfo game, HttpClient httpClient, AppSettings settings)
     {

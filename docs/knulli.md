@@ -157,6 +157,8 @@ The installed package includes `quiver-agent-report.json` (build choices,
 controller analysis, exact source citations and limitations) and
 `quiver-build-recipe.txt` (the successful reproducible recipe). Complete attempt
 logs are available in `knulli-auto-report-<request-id>`. Controller analysis must
+also appear in the install-result dialog (or CLI output), including unsupported
+input and the explicit lack of device verification. Controller analysis must
 identify native/adapted/unsupported input, distinguish normalized SDL
 GameController indices from physical Joystick indices, and cite actual source
 lines. Native/adapted claims require separate citations and explanations for

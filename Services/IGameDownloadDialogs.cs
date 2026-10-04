@@ -10,6 +10,11 @@ public interface IGameDownloadDialogs
     Task ShowRateLimitExceededAsync();
     Task ShowGitLabRateLimitExceededAsync();
     Task ShowErrorAsync(string message, string title);
+    Task ShowBuildReportAsync(string message)
+    {
+        Console.WriteLine(message);
+        return Task.CompletedTask;
+    }
 }
 
 public sealed class AvaloniaGameDownloadDialogs : IGameDownloadDialogs
@@ -33,6 +38,14 @@ public sealed class AvaloniaGameDownloadDialogs : IGameDownloadDialogs
 
     public Task ShowErrorAsync(string message, string title) =>
         GameDialogService.ShowMessageBoxAsync(message, title);
+
+    public Task ShowBuildReportAsync(string message)
+    {
+        if (Avalonia.Application.Current?.ApplicationLifetime is not null)
+            return GameDialogService.ShowMessageBoxAsync(message, "Agent Build Report");
+        Console.WriteLine(message);
+        return Task.CompletedTask;
+    }
 }
 
 public sealed class HeadlessGameDownloadDialogs : IGameDownloadDialogs

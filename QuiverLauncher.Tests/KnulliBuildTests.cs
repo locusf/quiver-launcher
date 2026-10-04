@@ -18,6 +18,25 @@ public sealed class KnulliBuildTests : IDisposable
     private const string DeviceProfile = """{"schema":1,"architecture":"aarch64","display":{"framebuffer":true},"controllers":[]}""";
 
     [Theory]
+    [InlineData("native")]
+    [InlineData("adapted")]
+    [InlineData("unsupported")]
+    public void Agent_assessments_are_visible_without_claiming_device_verification(string support)
+    {
+        var json = JsonSerializer.Serialize(new { controller = new { support, notes = "Source input analysis." } });
+        var message = KnulliBuildService.DescribeAgentResult(json, "/game/quiver-agent-report.json");
+        message.Should().Contain($"Controller support: {support} (agent assessment)");
+        message.Should().Contain("not verified on the device");
+        message.Should().Contain("/game/quiver-agent-report.json");
+    }
+
+    [Fact]
+    public void Invalid_controller_assessment_is_not_presented_as_success() =>
+        FluentActions.Invoking(() => KnulliBuildService.DescribeAgentResult(
+            """{"controller":{"support":"verified","notes":"unknown"}}""", "/game/report"))
+        .Should().Throw<InvalidDataException>();
+
+    [Theory]
     [InlineData("game-knulli-arm64.zip", true)]
     [InlineData("game-linux-aarch64.tar.gz", true)]
     [InlineData("game-linux-x64.tar.gz", false)]
