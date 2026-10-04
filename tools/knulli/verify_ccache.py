@@ -52,9 +52,14 @@ def main(cache_directory=None):
         source = root / "source"
         source.mkdir()
         cache = cache_directory or (root / "ccache")
+        cache.mkdir(parents=True, exist_ok=True)
+        counter = cache / "verification-header-value"
+        # Older verification snapshots already contain the fixed values 1 and 2.
+        changed_value = int(counter.read_text()) + 1 if counter.exists() else 3
+        counter.write_text(str(changed_value))
         outputs = []
         # The first completed compilations survive a failed recipe; the third changes a header.
-        for index, (value, result) in enumerate(((1, 1), (1, 0), (2, 0)), 1):
+        for index, (value, result) in enumerate(((1, 1), (1, 0), (changed_value, 0)), 1):
             engine = BuildAgent(source, root / f"round-{index}", {}, cache_directory=cache)
             directory = engine.output / "attempt-1"
             (directory / "recipe").mkdir(parents=True)
