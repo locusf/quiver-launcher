@@ -203,8 +203,9 @@ prints the fork URL, exact commit, saved round and whether this is a continuatio
 Agent builds also verify the checked-out commit before compiler setup and recheck
 the fork head before reasoning starts. Known recipes such as 2048 follow the same
 fork-first rule, using their fixed recipe/target identity rather than a hardware
-analysis profile. This resumes source fixes and reasoning context, not cached
-object files; compiler setup and compilation may still run again.
+analysis profile. Forks resume source fixes and reasoning context. Agent builds
+also reuse compiler results through ccache as described below; compiler setup
+and linking may still run again.
 Start a new launcher build request to use workflow updates; GitHub's re-run
 button on a historical run uses that run's older workflow commit.
 
@@ -245,9 +246,38 @@ startup. Update/restart an older running launcher and submit a new build (rather
 than rerunning the old workflow with its empty inputs). Manual `auto` dispatches
 must supply `target_profile`.
 
+### Compiler cache between attempts
+
+Agent build containers share `attempt-output/ccache`, mounted at `/ccache`. Its
+contents survive unsuccessful recipes, compiler timeouts and fresh reasoning
+rounds in the same job. The supplied CMake/Meson toolchains enable ccache for C
+and C++; ordinary cross-compiler names on PATH also use ccache for Make and
+Autotools. Keep build sources at `/tmp/game` and do not clear `/ccache`.
+
+GitHub restores this directory before an agent job and saves it with `always()`
+afterwards, including when the build failed. Cache keys isolate projects, device
+profiles, runner platforms and toolchain files, with a unique snapshot for each
+run/attempt. New source commits in the same project can reuse unchanged compiler
+results. There is no fallback to another project's or another device's cache.
+GitHub cache retention/eviction can cause a cold build; correctness does not
+depend on the cache being present.
+
+The cache is limited to 1 GB and checks compiler contents, source/header changes
+and compilation options. No relaxed correctness checks are enabled. It is not a
+saved build tree: linking, configuration and data extraction still run, but
+unchanged compilations can hit the cache. Cache contents are not pushed into
+game forks or included in installed game packages. Source-build containers still
+receive no credentials.
+
+Each attempt prints ccache statistics. CI also runs three fresh containers to
+verify that a failed recipe's completed compilations are reused by the next
+attempt for direct compiler calls, CMake and Meson, and that changing a header
+invalidates the old object.
+
 The source build runs as an unprivileged user in a disposable container with no
 network, GitHub credentials, Docker socket, or host filesystem access beyond its
-read-only source, read-only proposed recipe and output directory. CPU, memory, process count, and job time
+read-only source, read-only proposed recipe, output directory and scoped ccache
+directory. CPU, memory, process count, and job time
 are limited. Submodules are fetched before the isolated build. Build systems
 that download more dependencies during compilation will fail with a log rather
 than receive unrestricted network access.

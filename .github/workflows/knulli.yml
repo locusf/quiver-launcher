@@ -34,6 +34,19 @@ permissions:
   contents: read
 
 jobs:
+  test-compiler-cache:
+    if: github.event_name == 'push' || inputs.recipe == 'launcher'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build the isolated compiler image
+        run: docker build -t quiver-knulli-cross tools/knulli/cross
+      - name: Verify C and C++ cache reuse and invalidation
+        run: python3 tools/knulli/verify_ccache.py
+
   launcher:
     if: github.event_name == 'push' || inputs.recipe == 'launcher'
     runs-on: ubuntu-22.04
@@ -122,8 +135,31 @@ jobs:
         env:
           FORK_COMMIT: ${{ steps.fork.outputs.commit }}
         run: test "$(git -C game-source rev-parse HEAD)" = "$FORK_COMMIT"
+      - name: Scope compiler cache to project and device
+        id: ccache-scope
+        env:
+          SOURCE_REPOSITORY: ${{ inputs.source_repository }}
+          TARGET_PROFILE: ${{ inputs.target_profile }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os
+          profile = json.dumps(json.loads(os.environ["TARGET_PROFILE"]), sort_keys=True)
+          scope = hashlib.sha256((os.environ["SOURCE_REPOSITORY"].lower() + "\n" + profile).encode()).hexdigest()
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"scope={scope}\n")
+          PY
+      - name: Restore compiler cache from previous attempts
+        id: compiler-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: attempt-output/ccache
+          key: knulli-ccache-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/knulli/cross/**') }}-${{ steps.ccache-scope.outputs.scope }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            knulli-ccache-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/knulli/cross/**') }}-${{ steps.ccache-scope.outputs.scope }}-
       - name: Prepare isolated cross compiler
         run: docker build -t quiver-knulli-cross tools/knulli/cross
+      - name: Verify compiler cache reuse across fresh containers
+        run: python3 tools/knulli/verify_ccache.py
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -144,6 +180,12 @@ jobs:
           set -o pipefail
           mkdir -p attempt-output
           python tools/knulli/agent/build_agent.py 2>&1 | tee attempt-output/build.log
+      - name: Save compiler cache even after a failed build
+        if: always() && steps.compiler-cache.outputs.cache-primary-key != ''
+        uses: actions/cache/save@v4
+        with:
+          path: attempt-output/ccache
+          key: ${{ steps.compiler-cache.outputs.cache-primary-key }}
       - name: Upload build report
         if: always()
         uses: actions/upload-artifact@v4

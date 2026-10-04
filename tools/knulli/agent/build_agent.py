@@ -128,9 +128,17 @@ def validate_package(package, entrypoint):
 
 
 class BuildAgent:
-    def __init__(self, source, output, profile, runner=None, continuation=None, round_number=1):
+    def __init__(self, source, output, profile, runner=None, continuation=None, round_number=1,
+                 cache_directory=None):
         self.source = source.resolve()
         self.output = output.resolve()
+        self.cache_directory = (cache_directory or (self.output / "ccache")).absolute()
+        if self.cache_directory.is_symlink():
+            raise ValueError("Compiler cache must be a real directory, not a symlink.")
+        self.cache_directory = self.cache_directory.resolve()
+        if self.cache_directory.is_relative_to(self.source):
+            raise ValueError("Compiler cache must be outside the game source checkout.")
+        self.cache_directory.mkdir(parents=True, exist_ok=True)
         self.profile = profile
         self.runner = runner or self.run_container
         self.attempts = []
@@ -245,7 +253,11 @@ class BuildAgent:
             "-v", f"{self.source}:/source:ro",
             "-v", f"{directory / 'recipe'}:/recipe:ro",
             "-v", f"{directory / 'files'}:/output",
-            "--entrypoint", "/bin/bash", "quiver-knulli-cross", "/recipe/build.sh",
+            "-v", f"{self.cache_directory}:/ccache",
+            "-e", "CCACHE_DIR=/ccache", "-e", "CCACHE_BASEDIR=/tmp/game",
+            "-e", "CCACHE_MAXSIZE=1G", "-e", "CCACHE_COMPILERCHECK=content",
+            "--entrypoint", "/bin/bash", "quiver-knulli-cross", "-c",
+            '/bin/bash /recipe/build.sh; result=$?; /usr/bin/ccache --show-stats; exit "$result"',
         ]
         try:
             timeout = min(360, self.deadline - time.monotonic()) if self.deadline is not None else 360
@@ -386,10 +398,12 @@ async def run_fork_rounds(source, output, profile, store, run_round=None):
     store.restore()
     deadline = asyncio.get_running_loop().time() + AGENT_TIMEOUT_SECONDS
     first_round = (continuation or {}).get("round", 0) + 1
+    cache_directory = output.resolve() / "ccache"
     for offset in range(MAX_AGENT_ROUNDS):
         round_number = first_round + offset
         engine = BuildAgent(source, output / f"round-{round_number}", profile,
-                            continuation=continuation, round_number=round_number)
+                            continuation=continuation, round_number=round_number,
+                            cache_directory=cache_directory)
         engine.deadline = deadline
         if asyncio.get_running_loop().time() >= deadline:
             raise TimeoutError("The shared fork-continuation deadline expired.")
@@ -448,6 +462,11 @@ the image smoke-tests their CMake discovery and linkage. Do not remove Boost fun
 Container: Ubuntu 22.04, ARM64 gcc/g++, cmake/ninja/meson/autotools/make, pkg-config,
 SDL2/image/mixer/ttf, GL/EGL, freetype/png/jpeg/openal/ogg/vorbis/curl/zlib development libraries.
 CC/CXX, CFLAGS/CXXFLAGS and PKG_CONFIG_LIBDIR already select ARM64 Cortex-A53.
+ccache is enabled for the supplied CMake/Meson toolchains and compiler names on PATH.
+/ccache is a shared compiler-cache directory preserved across attempts and fresh agent
+rounds, including failed builds, and transferred to later GitHub runs. Leave it intact.
+Use /tmp/game consistently and do not disable ccache or change compiler paths to bypass it.
+It caches object compilation, not linking, generated data, or complete build directories.
 CMake toolchain: /opt/cross/aarch64.cmake; Meson cross-file: /opt/cross/aarch64.ini.
 Source is read-only in the build container at /source. Copy it to /tmp/game to build.
 Use edit_source/add_source tools for source fixes so they persist to the dedicated fork.

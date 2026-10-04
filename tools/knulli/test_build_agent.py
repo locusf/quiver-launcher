@@ -155,8 +155,46 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         args = run.call_args.args[0]
         self.assertEqual(args[args.index("--network") + 1], "none")
         self.assertIn(f"{directory / 'recipe'}:/recipe:ro", args)
+        self.assertIn(f"{engine.cache_directory}:/ccache", args)
+        self.assertIn("CCACHE_COMPILERCHECK=content", args)
+        self.assertIn("CCACHE_MAXSIZE=1G", args)
         self.assertNotIn("secret", " ".join(args))
         self.assertNotIn("/var/run/docker.sock", " ".join(args))
+
+    def test_attempt_containers_share_one_cache_directory_outside_source(self):
+        engine = agent.BuildAgent(self.source, self.output, {})
+        mounts = []
+        for number in (1, 2):
+            directory = engine.output / f"attempt-{number}"
+            directory.mkdir()
+            with patch.object(agent.subprocess, "run") as run:
+                run.return_value.returncode = 1
+                engine.run_container(directory)
+            mounts.append(next(arg for arg in run.call_args.args[0] if arg.endswith(":/ccache")))
+        self.assertEqual(mounts[0], mounts[1])
+        self.assertFalse(engine.cache_directory.is_relative_to(engine.source))
+
+    def test_cache_cannot_be_a_source_directory_or_symlink(self):
+        with self.assertRaisesRegex(ValueError, "outside the game source"):
+            agent.BuildAgent(self.source, self.output, {}, cache_directory=self.source / "ccache")
+        self.assertFalse((self.source / "ccache").exists())
+        alias = Path(self.temporary.name) / "cache-link"
+        alias.symlink_to(self.source, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "not a symlink"):
+            agent.BuildAgent(self.source, self.output, {}, cache_directory=alias)
+
+    def test_workflow_transfers_cache_on_failures_without_cross_project_restore(self):
+        workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/knulli.yml").read_text()
+        job = workflow.split("  attempt-game:", 1)[1].split("  game:", 1)[0]
+        self.assertIn("actions/cache/restore@v4", job)
+        self.assertIn("actions/cache/save@v4", job)
+        self.assertIn("if: always() && steps.compiler-cache.outputs.cache-primary-key != ''", job)
+        self.assertIn("path: attempt-output/ccache", job)
+        restore = job.split("restore-keys: |", 1)[1].split("      - name:", 1)[0]
+        self.assertIn("steps.ccache-scope.outputs.scope", restore)
+        self.assertIn("hashFiles('tools/knulli/cross/**')", restore)
+        self.assertEqual(len(restore.strip().splitlines()), 1)
+        self.assertIn("${{ github.run_id }}-${{ github.run_attempt }}", job)
 
     async def test_failed_build_idle_turn_resumes_reasoning_with_error_context(self):
         count = 0
@@ -305,10 +343,13 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
 
         store.checkpoint = checkpoint
         deadlines = []
+        cache_directories = []
 
         async def run_round(engine):
             deadlines.append(engine.deadline)
+            cache_directories.append(engine.cache_directory)
             if engine.round_number == 1:
+                (engine.cache_directory / "compiled-cache-entry").write_text("retained after failure")
                 engine.add_source("config.h", "#define KNULLI 1\n")
                 engine.last_summary = "Added missing generated configuration."
                 engine.last_outcome = {"success": False, "error": "config.h missing in old build"}
@@ -317,6 +358,8 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(engine.calls, 0)
             self.assertIn("missing generated configuration", engine.continuation["summary"])
             self.assertTrue((engine.source / "config.h").is_file())
+            self.assertEqual((engine.cache_directory / "compiled-cache-entry").read_text(),
+                             "retained after failure")
             engine.runner = self.successful_build
             engine.attempt_build("make with config", "game", self.report)
             engine.finish("Compiled using the saved configuration fix.")
@@ -324,6 +367,8 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         await agent.run_fork_rounds(self.source, self.output, {}, store, run_round)
         self.assertEqual([item[1] for item in checkpoints], ["tool-budget-exhausted", "compiled-unverified"])
         self.assertEqual(deadlines[0], deadlines[1])
+        self.assertEqual(cache_directories[0], cache_directories[1])
+        self.assertEqual(cache_directories[0], self.output / "ccache")
         report = json.loads((self.output / "package" / "quiver-agent-report.json").read_text())
         self.assertEqual(report["fork"]["commit"], "2")
         self.assertEqual(report["round"], 2)
