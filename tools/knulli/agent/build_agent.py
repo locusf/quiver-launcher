@@ -435,6 +435,12 @@ inspect_source takes 1-based start lines and at most 200 lines per call.
 Adapt flags, source patches, installed data, and controller setup based on actual errors.
 Do not simply retry the same script. No package/network installation is available during builds.
 Explain missing dependencies if the supplied toolchain cannot satisfy them.
+Preserve application behavior. Never replace translation, Unicode conversion, parsing,
+audio, rendering or other required functionality with no-ops, pass-through strings or
+lossy fallbacks just to compile. Fix dependency detection/linking first. If a dependency
+cannot be supplied or replaced faithfully, retain it and report the blocker.
+Boost locale, program_options and date_time are available as ARM64 multiarch libraries;
+the image smoke-tests their CMake discovery and linkage. Do not remove Boost functionality.
 
 Container: Ubuntu 22.04, ARM64 gcc/g++, cmake/ninja/meson/autotools/make, pkg-config,
 SDL2/image/mixer/ttf, GL/EGL, freetype/png/jpeg/openal/ogg/vorbis/curl/zlib development libraries.

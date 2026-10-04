@@ -17,6 +17,11 @@ RUN dpkg --add-architecture arm64 \
        libboost-locale-dev:arm64 libboost-program-options-dev:arm64 libboost-date-time-dev:arm64 \
        libcurl4-openssl-dev:arm64 zlib1g-dev:arm64 libgl-dev:arm64 libegl-dev:arm64
 COPY aarch64.cmake aarch64.ini build.py /opt/cross/
+COPY toolchain-check /opt/cross/toolchain-check
+RUN cmake -S /opt/cross/toolchain-check -B /tmp/toolchain-check \
+        -DCMAKE_TOOLCHAIN_FILE=/opt/cross/aarch64.cmake -DBoost_NO_BOOST_CMAKE=ON \
+    && cmake --build /tmp/toolchain-check \
+    && aarch64-linux-gnu-readelf -h /tmp/toolchain-check/check-toolchain | grep 'Machine:.*AArch64'
 ENV CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++ AR=aarch64-linux-gnu-ar
 ENV PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
 ENV CFLAGS="-O2 -mcpu=cortex-a53 -mtune=cortex-a53 -fsigned-char"

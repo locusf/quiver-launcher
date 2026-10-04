@@ -147,6 +147,11 @@ compilers and common SDL2, OpenGL/EGL, image, audio, and compression libraries.
 Missing dependencies can still require updating the toolchain; the agent cannot
 install arbitrary network dependencies from within a source build.
 
+The image smoke-tests ARM64 Boost discovery and linkage. Agents must fix
+dependency detection rather than remove translations, Unicode handling or other
+required functionality to get a binary. Checkpoints remain reviewable work in
+progress, not permission to merge behavioral regressions.
+
 If the agent ends a turn after a failed or unfinished build, the orchestrator
 resumes reasoning in the same session with the last build error, compiler log,
 tool error and remaining budgets. Up to six reasoning turns are allowed; they

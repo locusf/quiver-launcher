@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.16)
+project(check_toolchain LANGUAGES CXX)
+find_package(Boost REQUIRED COMPONENTS locale program_options date_time)
+add_executable(check-toolchain main.cpp)
+target_link_libraries(check-toolchain PRIVATE Boost::locale Boost::program_options Boost::date_time)
