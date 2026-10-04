@@ -86,6 +86,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Validate observed device profile before starting the agent
+        env:
+          TARGET_PROFILE: ${{ inputs.target_profile }}
+        run: python3 tools/knulli/agent/build_agent.py --validate-profile
       - uses: actions/checkout@v4
         with:
           repository: ${{ inputs.source_repository }}

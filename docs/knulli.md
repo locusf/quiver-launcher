@@ -140,6 +140,18 @@ compilers and common SDL2, OpenGL/EGL, image, audio, and compression libraries.
 Missing dependencies can still require updating the toolchain; the agent cannot
 install arbitrary network dependencies from within a source build.
 
+If the agent ends a turn after a failed or unfinished build, the orchestrator
+resumes reasoning in the same session with the last build error, compiler log,
+tool error and remaining budgets. Up to six reasoning turns are allowed; they
+share the original build/tool budgets and overall deadline. A validated compile
+still needs `finish` to publish; an agent summary alone is never success.
+
+A missing hardware profile is not a compiler failure and cannot be repaired by
+the model. It is rejected before source checkout, toolchain setup or agent
+startup. Update/restart an older running launcher and submit a new build (rather
+than rerunning the old workflow with its empty inputs). Manual `auto` dispatches
+must supply `target_profile`.
+
 The source build runs as an unprivileged user in a disposable container with no
 network, GitHub credentials, Docker socket, or host filesystem access beyond its
 read-only source, read-only proposed recipe and output directory. CPU, memory, process count, and job time
