@@ -257,7 +257,8 @@ Autotools. Keep build sources at `/tmp/game` and do not clear `/ccache`.
 GitHub restores this directory before an agent job and saves it with `always()`
 afterwards, including when the build failed. Cache keys isolate projects, device
 profiles, runner platforms and toolchain files, with a unique snapshot for each
-run/attempt. New source commits in the same project can reuse unchanged compiler
+run/attempt. Generated Python bytecode is excluded from the toolchain fingerprint.
+New source commits in the same project can reuse unchanged compiler
 results. There is no fallback to another project's or another device's cache.
 GitHub cache retention/eviction can cause a cold build; correctness does not
 depend on the cache being present.

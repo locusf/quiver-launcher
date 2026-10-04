@@ -192,7 +192,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("path: attempt-output/ccache", job)
         restore = job.split("restore-keys: |", 1)[1].split("      - name:", 1)[0]
         self.assertIn("steps.ccache-scope.outputs.scope", restore)
-        self.assertIn("hashFiles('tools/knulli/cross/**')", restore)
+        self.assertIn("hashFiles('tools/knulli/cross/**', '!**/__pycache__/**', '!**/*.pyc')", restore)
         self.assertEqual(len(restore.strip().splitlines()), 1)
         self.assertIn("${{ github.run_id }}-${{ github.run_attempt }}", job)
 
