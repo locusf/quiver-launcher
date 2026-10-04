@@ -568,6 +568,10 @@ def main():
         store = ForkStore(Path("game-source"), os.environ["SOURCE_REPOSITORY"],
                           os.environ["SOURCE_REF"], profile,
                           GitHubApi(os.environ.pop("QUIVER_FORK_TOKEN", None)))
+        if "--resolve-fork" in sys.argv[1:]:
+            store.ensure_fork()
+            store.write_checkout_outputs(Path(os.environ["GITHUB_OUTPUT"]))
+            return 0
         asyncio.run(run_fork_rounds(Path("game-source"), output, profile, store))
     except (OSError, ValueError, RuntimeError, KeyError, TimeoutError) as error:
         with (output / "agent-error.txt").open("w") as stream:

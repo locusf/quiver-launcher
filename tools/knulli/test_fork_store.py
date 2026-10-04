@@ -138,6 +138,60 @@ class ForkStoreTests(unittest.TestCase):
             self.store.checkpoint(SimpleNamespace(), "blocked")
         self.assertFalse(any(method == "PATCH" for method, _, _ in self.api.calls))
 
+    def test_restore_checks_out_actual_checkpoint_source_before_reasoning(self):
+        self.store.ensure_fork()
+        (self.source / "game.c").write_text("int main(void) { return 42; }\n")
+        self.git("add", "game.c")
+        self.git("commit", "-qm", "Saved fork fix")
+        checkpoint = self.git("rev-parse", "HEAD").strip()
+        self.git("switch", "--detach", self.head)
+        self.store.head = checkpoint
+        self.store.state = {"round": 2, "status": "blocked"}
+        real_git = self.store.git
+        fetches = []
+
+        def git(*args):
+            if args[0] == "fetch":
+                fetches.append(args)
+                return ""
+            return real_git(*args)
+
+        self.store.git = git
+        restored = self.store.restore()
+        self.assertEqual(restored["round"], 2)
+        self.assertEqual(self.git("rev-parse", "HEAD").strip(), checkpoint)
+        self.assertIn("return 42", (self.source / "game.c").read_text())
+        self.assertEqual(fetches[0][-1], checkpoint)
+
+    def test_restore_rejects_dirty_source_without_discarding_changes(self):
+        self.store.ensure_fork()
+        self.store.head = "a" * 40
+        (self.source / "game.c").write_text("local unsaved work\n")
+        with self.assertRaisesRegex(RuntimeError, "dirty source"):
+            self.store.restore()
+        self.assertEqual((self.source / "game.c").read_text(), "local unsaved work\n")
+
+    def test_all_game_checkouts_are_fork_first(self):
+        workflow = (Path(__file__).resolve().parents[2] / ".github/workflows/knulli.yml").read_text()
+        job = workflow.split("  attempt-game:", 1)[1].split("  game:", 1)[0]
+        self.assertLess(job.index("build_agent.py --resolve-fork"), job.index("Check out saved game fork directly"))
+        self.assertLess(job.index("Verify restored fork source"), job.index("Prepare isolated cross compiler"))
+        for game_job in (job, workflow.split("  game:", 1)[1]):
+            self.assertIn("repository: ${{ steps.fork.outputs.repository }}", game_job)
+            self.assertIn("ref: ${{ steps.fork.outputs.commit }}", game_job)
+            self.assertNotIn("repository: ${{ inputs.source_repository }}", game_job)
+            self.assertNotIn("ref: ${{ inputs.source_ref }}", game_job)
+
+    def test_fork_is_resolved_without_an_upstream_working_tree(self):
+        self.store.source = self.source / "not-checked-out"
+        self.store.ensure_fork()
+        outputs = self.source / "github-output"
+        self.store.write_checkout_outputs(outputs)
+        text = outputs.read_text()
+        self.assertIn("repository=builder/game\n", text)
+        self.assertIn(f"commit={self.head}\n", text)
+        self.assertFalse(self.store.source.exists())
+
     def test_source_edit_policy_blocks_workflows_licenses_and_symlink_parents(self):
         (self.source / "alias").symlink_to(self.source / ".git", target_is_directory=True)
         for path in ("../outside", ".github/workflows/build.yml", ".git/config",

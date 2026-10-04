@@ -98,13 +98,26 @@ jobs:
         env:
           TARGET_PROFILE: ${{ inputs.target_profile }}
         run: python3 tools/knulli/agent/build_agent.py --validate-profile
-      - uses: actions/checkout@v4
+      - name: Resolve or create game fork and select saved checkpoint
+        id: fork
+        env:
+          TARGET_PROFILE: ${{ inputs.target_profile }}
+          QUIVER_FORK_TOKEN: ${{ secrets.QUIVER_FORK_TOKEN }}
+          SOURCE_REPOSITORY: ${{ inputs.source_repository }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: python3 tools/knulli/agent/build_agent.py --resolve-fork
+      - name: Check out saved game fork directly
+        uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.source_repository }}
-          ref: ${{ inputs.source_ref }}
+          repository: ${{ steps.fork.outputs.repository }}
+          ref: ${{ steps.fork.outputs.commit }}
           submodules: recursive
           path: game-source
           persist-credentials: false
+      - name: Verify restored fork source
+        env:
+          FORK_COMMIT: ${{ steps.fork.outputs.commit }}
+        run: test "$(git -C game-source rev-parse HEAD)" = "$FORK_COMMIT"
       - name: Prepare isolated cross compiler
         run: docker build -t quiver-knulli-cross tools/knulli/cross
       - uses: actions/setup-python@v5
@@ -153,6 +166,9 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.recipe == '2048'
     runs-on: ubuntu-22.04
     timeout-minutes: 15
+    concurrency:
+      group: knulli-agent-libretro/libretro-2048-${{ inputs.source_ref }}
+      cancel-in-progress: false
     steps:
       - name: Validate dispatch inputs
         env:
@@ -164,10 +180,27 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: actions/checkout@v4
+      - name: Resolve or create known-recipe game fork
+        id: fork
+        env:
+          QUIVER_FORK_TOKEN: ${{ secrets.QUIVER_FORK_TOKEN }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+        run: |
+          PYTHONPATH=tools/knulli/agent python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from fork_store import ForkStore, GitHubApi
+          store = ForkStore(Path("source"), "libretro/libretro-2048", os.environ["SOURCE_REF"],
+                            {"recipe": "2048", "target": "linux-arm64"},
+                            GitHubApi(os.environ["QUIVER_FORK_TOKEN"]))
+          store.ensure_fork()
+          store.write_checkout_outputs(Path(os.environ["GITHUB_OUTPUT"]))
+          PY
+      - name: Check out known-recipe fork directly
+        uses: actions/checkout@v4
         with:
-          repository: libretro/libretro-2048
-          ref: ${{ inputs.source_ref }}
+          repository: ${{ steps.fork.outputs.repository }}
+          ref: ${{ steps.fork.outputs.commit }}
           path: source
           persist-credentials: false
       - name: Install ARM64 cross compiler

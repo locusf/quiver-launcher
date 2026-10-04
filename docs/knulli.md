@@ -165,6 +165,18 @@ receives those diagnostics and reads the already-patched source. After three
 rounds, the job stops with the saved fork URL; a new build request resumes that
 same checkpoint. The deadline is never reset within a job.
 
+Every game build resolves or creates its fork **before any game source checkout**.
+The checkout uses the fork repository and selected checkpoint commit directly;
+there is no upstream bootstrap checkout or upstream-build fallback. The log
+prints the fork URL, exact commit, saved round and whether this is a continuation.
+Agent builds also verify the checked-out commit before compiler setup and recheck
+the fork head before reasoning starts. Known recipes such as 2048 follow the same
+fork-first rule, using their fixed recipe/target identity rather than a hardware
+analysis profile. This resumes source fixes and reasoning context, not cached
+object files; compiler setup and compilation may still run again.
+Start a new launcher build request to use workflow updates; GitHub's re-run
+button on a historical run uses that run's older workflow commit.
+
 ### Forks and source fixes
 
 Forks are created on demand only for public projects with recognized open-source

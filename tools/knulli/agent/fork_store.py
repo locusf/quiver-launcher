@@ -114,7 +114,9 @@ class ForkStore:
         self.require_actions_disabled()
         ref = self.api("GET", f"repos/{self.repository}/git/ref/heads/{self.branch}", missing_ok=True)
         if ref is None:
-            if (self.source / ".quiver-agent").exists():
+            reserved = self.api("GET",
+                f"repos/{self.upstream}/contents/.quiver-agent?ref={self.source_ref}", missing_ok=True)
+            if reserved is not None or (self.source / ".quiver-agent").exists():
                 raise RuntimeError("Upstream already uses the reserved .quiver-agent checkpoint directory.")
             ref = self.api("POST", f"repos/{self.repository}/git/refs",
                            {"ref": "refs/heads/" + self.branch, "sha": self.source_ref})
@@ -132,6 +134,18 @@ class ForkStore:
             raise RuntimeError("Existing build branch has no matching checkpoint; refusing to overwrite it.")
         return self.state
 
+    def write_checkout_outputs(self, path):
+        if not self.repository or not self.head:
+            raise RuntimeError("Resolve the game fork before selecting its checkout.")
+        with path.open("a") as output:
+            output.write(f"repository={self.repository}\ncommit={self.head}\nbranch={self.branch}\n")
+        print("[fork] Selected game source: " + json.dumps({
+            "repository": self.repository, "branch": self.branch, "commit": self.head,
+            "resuming": self.state is not None, "saved_round": (self.state or {}).get("round"),
+            "status": (self.state or {}).get("status", "new"),
+            "url": f"https://github.com/{self.repository}/tree/{quote(self.branch, safe='/')}",
+        }), flush=True)
+
     def require_actions_disabled(self):
         if self.api("GET", f"repos/{self.repository}/actions/permissions")["enabled"]:
             raise RuntimeError(f"Disable Actions on {self.repository} before automatic source-fix pushes.")
@@ -142,6 +156,14 @@ class ForkStore:
                 raise RuntimeError("Refusing to replace a dirty source checkout while resuming a fork.")
             self.git("fetch", "--no-tags", "--depth=1", f"https://github.com/{self.repository}.git", self.head)
             self.git("switch", "--detach", self.head)
+        if self.git("rev-parse", "HEAD").strip() != self.head:
+            raise RuntimeError("Fork restoration did not select the expected checkpoint commit.")
+        print("[fork] Source checkout ready: " + json.dumps({
+            "repository": self.repository, "branch": self.branch, "commit": self.head,
+            "resuming": self.state is not None, "saved_round": (self.state or {}).get("round"),
+            "status": (self.state or {}).get("status", "new"),
+            "url": f"https://github.com/{self.repository}/tree/{quote(self.branch, safe='/')}",
+        }), flush=True)
         return self.state
 
     def checkpoint(self, engine, status):
