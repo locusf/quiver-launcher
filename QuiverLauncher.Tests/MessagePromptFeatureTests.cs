@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.Threading;
 using FluentAssertions;
 using QuiverLauncher.Services;
 using QuiverLauncher.ViewModels;
@@ -9,6 +10,51 @@ namespace QuiverLauncher.Tests;
 
 public class MessagePromptFeatureTests
 {
+    [AvaloniaFact]
+    public async Task License_prompt_defaults_to_cancel_and_scrolls_without_selecting_accept()
+    {
+        var session = new LauncherSession();
+        var view = new MessagePromptView();
+        view.Configure(session);
+        var window = new Window { Content = view, Width = 720, Height = 720 };
+        try
+        {
+            window.Show();
+            var text = string.Join("\n", Enumerable.Repeat("Full license text must remain readable.", 100));
+            var answer = view.ShowAsync(text, "Review source license", true, preferCancelDefault: true,
+                acceptLabel: "Continue", rejectLabel: "Cancel", scrollBody: true);
+            window.UpdateLayout();
+            Dispatcher.UIThread.RunJobs();
+            var cancel = view.FindControl<Button>("MessagePromptNoButton")!;
+            cancel.Content.Should().Be("Cancel");
+            cancel.IsFocused.Should().BeTrue();
+            view.Model.Body.Should().Be(text);
+            var scroll = view.FindControl<ScrollViewer>("MessagePromptScroll")!;
+            view.Navigate(NavigationDirection.Down).Should().BeTrue();
+            scroll.Offset.Y.Should().BeGreaterThan(0);
+            cancel.IsFocused.Should().BeTrue();
+            view.Confirm();
+            (await answer).Should().Be(MessagePromptResult.No);
+
+            var acceptance = view.ShowAsync("Confirm permitted use and PUBLIC fork/artifacts.",
+                "License acceptance", true, preferCancelDefault: true,
+                acceptLabel: "Accept & build", rejectLabel: "Cancel", scrollBody: true);
+            Dispatcher.UIThread.RunJobs();
+            cancel.IsFocused.Should().BeTrue();
+            view.FindControl<Button>("MessagePromptYesButton")!.Content.Should().Be("Accept & build");
+            view.Navigate(NavigationDirection.Left);
+            view.Confirm();
+            (await acceptance).Should().Be(MessagePromptResult.Yes);
+            var ordinary = view.ShowAsync("Ordinary question", "Confirm", true);
+            view.Model.AcceptLabel.Should().Be("Yes");
+            view.Model.RejectLabel.Should().Be("No");
+            view.Model.ScrollBody.Should().BeFalse();
+            view.Cancel();
+            (await ordinary).Should().Be(MessagePromptResult.No);
+        }
+        finally { window.Close(); await session.DisposeAsync(); }
+    }
+
     [Fact]
     public async Task Prompts_preserve_queue_order_and_close_all_waiters_on_cancellation()
     {

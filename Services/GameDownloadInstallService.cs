@@ -128,7 +128,7 @@ public static class GameDownloadInstallService
                     if (recipe.Id == "auto" && !sourceOnly)
                         recipe = recipe with { SourceRef = latestRelease.tag_name };
                     buildArtifact = await fallback.Service.BuildAsync(
-                        recipe, LauncherSession.OperationCancellation).ConfigureAwait(false);
+                        recipe, LauncherSession.OperationCancellation, dialogs.ConfirmBuildLicenseAsync).ConfigureAwait(false);
                     if (sourceOnly)
                         latestRelease = (recipe with { SourceRef = buildArtifact.SourceRef }).Release;
                     asset = new GitHubAsset
@@ -431,6 +431,13 @@ public static class GameDownloadInstallService
                         game.GameManager.OnPropertyChanged(nameof(GameManager.Games));
                     });
             }
+        }
+        catch (KnulliLicenseDeclinedException)
+        {
+            game.Status = triggerStatus == GameStatus.UpdateAvailable ? GameStatus.UpdateAvailable : GameStatus.NotInstalled;
+            game.InstalledVersion = previousVersion;
+            game.DownloadProgress = 0;
+            game.ClearDownloadSelection();
         }
         catch (HttpRequestException ex)
         {

@@ -65,6 +65,74 @@ public sealed class KnulliBuildTests : IDisposable
     }
 
     [Fact]
+    public async Task Unrecognized_license_requires_explicit_acceptance_before_dispatch()
+    {
+        var handler = new BuildHandler { RecipeId = "auto", LicenseId = "NOASSERTION" };
+        using var client = new HttpClient(handler);
+        var service = new KnulliBuildService(client, Configuration with { AttemptUnconfiguredGames = true },
+            "test-token", _state, _ => Task.FromResult(DeviceProfile));
+        KnulliLicenseReview? shown = null;
+        await service.BuildAsync(new("auto", "owner/game", "v1.2"),
+            confirmLicense: review =>
+            {
+                handler.Dispatches.Should().Be(0);
+                shown = review;
+                return Task.FromResult(true);
+            });
+        shown.Should().NotBeNull();
+        shown!.LicenseText.Should().Be("Fixture noncommercial license.\n");
+        shown.ReviewMessage.Should().Contain(shown.LicenseText);
+        shown.AcceptanceMessage.Should().Contain("PUBLIC fork");
+        shown.AcceptanceMessage.Should().Contain("does not override restrictions");
+        var consent = JsonSerializer.Deserialize<KnulliLicenseAcceptance>(handler.LicenseAcceptance!);
+        consent.Should().Be(shown.Accept());
+        consent!.SourceRef.Should().Be(new string('c', 40));
+        consent.LicenseSha256.Should().Be(Convert.ToHexString(
+            SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(shown.LicenseText))).ToLowerInvariant());
+        handler.Dispatches.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Declining_license_never_dispatches_or_creates_pending_build()
+    {
+        var handler = new BuildHandler { RecipeId = "auto", LicenseId = "NOASSERTION" };
+        using var client = new HttpClient(handler);
+        var service = new KnulliBuildService(client, Configuration with { AttemptUnconfiguredGames = true },
+            "test-token", _state, _ => Task.FromResult(DeviceProfile));
+        await service.Invoking(s => s.BuildAsync(new("auto", "owner/game", "v1.2"),
+            confirmLicense: _ => Task.FromResult(false))).Should().ThrowAsync<KnulliLicenseDeclinedException>();
+        handler.Dispatches.Should().Be(0);
+        Directory.Exists(_state).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Headless_build_does_not_implicitly_accept_unrecognized_license()
+    {
+        var handler = new BuildHandler { RecipeId = "auto", LicenseId = "NOASSERTION" };
+        using var client = new HttpClient(handler);
+        var service = new KnulliBuildService(client, Configuration with { AttemptUnconfiguredGames = true },
+            "test-token", _state, _ => Task.FromResult(DeviceProfile));
+        await service.Invoking(s => s.BuildAsync(new("auto", "owner/game", "v1.2")))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*explicit acceptance*");
+        handler.Dispatches.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Missing_license_is_not_offered_for_acceptance()
+    {
+        var handler = new BuildHandler { RecipeId = "auto", MissingLicense = true };
+        using var client = new HttpClient(handler);
+        var service = new KnulliBuildService(client, Configuration with { AttemptUnconfiguredGames = true },
+            "test-token", _state, _ => Task.FromResult(DeviceProfile));
+        var prompted = false;
+        await service.Invoking(s => s.BuildAsync(new("auto", "owner/game", "v1.2"),
+            confirmLicense: _ => { prompted = true; return Task.FromResult(true); }))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*No license file*");
+        prompted.Should().BeFalse();
+        handler.Dispatches.Should().Be(0);
+    }
+
+    [Fact]
     public async Task Device_input_changes_invalidate_agent_build_cache()
     {
         var handler = new BuildHandler { RecipeId = "auto" };
@@ -319,6 +387,9 @@ public sealed class KnulliBuildTests : IDisposable
         public string? SourceRef { get; private set; }
         public string? SourceRepository { get; private set; }
         public string? TargetProfile { get; private set; }
+        public string? LicenseAcceptance { get; private set; }
+        public string LicenseId { get; init; } = "MIT";
+        public bool MissingLicense { get; init; }
         public string RecipeId { get; init; } = "2048";
         public string Conclusion { get; init; } = "success";
         public bool Expired { get; init; }
@@ -334,6 +405,16 @@ public sealed class KnulliBuildTests : IDisposable
             var path = request.RequestUri!.AbsolutePath;
             if (path == "/repos/owner/game/commits/v1.2")
                 return Json(new { sha = new string('c', 40) });
+            if (path.EndsWith("/license"))
+            {
+                request.RequestUri.Query.Should().Contain(new string('c', 40));
+                return MissingLicense ? new HttpResponseMessage(HttpStatusCode.NotFound) : Json(new
+                {
+                    license = new { spdx_id = LicenseId, name = "Fixture license" },
+                    encoding = "base64", path = "COPYING",
+                    content = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("Fixture noncommercial license.\n"))
+                });
+            }
             if (request.Method == HttpMethod.Post)
             {
                 path.Should().EndWith("/actions/workflows/knulli.yml/dispatches");
@@ -342,6 +423,7 @@ public sealed class KnulliBuildTests : IDisposable
                 SourceRef = body.GetProperty("inputs").GetProperty("source_ref").GetString();
                 SourceRepository = body.GetProperty("inputs").GetProperty("source_repository").GetString();
                 TargetProfile = body.GetProperty("inputs").GetProperty("target_profile").GetString();
+                LicenseAcceptance = body.GetProperty("inputs").GetProperty("license_acceptance").GetString();
                 _requestId = body.GetProperty("inputs").GetProperty("request_id").GetString();
                 Dispatches++;
                 return new HttpResponseMessage(DispatchStatus);

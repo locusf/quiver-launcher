@@ -72,6 +72,37 @@ directory. Tokens are not included in dispatch inputs, game requests, or logs.
 Treat device backups and settings as sensitive. Do not reuse a broad personal
 token when a repository-scoped token is available.
 
+### License review in the launcher
+
+Before an unknown-game build is dispatched, Quiver checks the license at the
+resolved source commit. A recognized license continues normally. An unrecognized
+license opens a two-step GUI:
+
+1. **Review source license** shows the repository, pinned commit, license URL and
+   full license text. Use D-pad Up/Down to scroll, Left/Right to select
+   **Continue** or **Cancel**.
+2. **License acceptance** asks you to confirm that you have read the terms and
+   that your intended use, PUBLIC fork, modified-source pushes and downloadable
+   artifacts are permitted. Only **Accept & build** authorizes the request.
+
+Both steps default to Cancel. Back/Escape, closing Quiver, or declining does not
+dispatch a build. No automatic acceptance is performed by the agent or CLI.
+Each build request/retry requires a new review for an unrecognized license;
+acceptance is not a global or permanent allowlist.
+
+Acceptance is bound to the repository, full source commit, license path and
+SHA-256 of the exact license bytes. The GitHub worker independently fetches and
+verifies these before creating/resuming a fork. A different project, commit or
+license cannot reuse it. Fork checkpoints and validated package reports retain
+the acceptance record; the reviewed license is included with the package.
+
+This UI does **not** grant rights or remove restrictions. In particular, an
+original Doom Source License can restrict commercial use; a user must separately
+ensure source/artifact redistribution is permitted and preserve notices. Do not
+include commercial game data without permission. Missing or unreadable license
+text cannot be accepted: the build remains blocked. Private repositories also
+remain unsupported.
+
 The initial supported recipe is:
 
 | Recipe | Source | Runtime |
@@ -179,9 +210,10 @@ button on a historical run uses that run's older workflow commit.
 
 ### Forks and source fixes
 
-Forks are created on demand only for public projects with recognized open-source
-licenses. An unknown license requires manual verification; it is not assumed to
-grant redistribution rights. No fork is created in the upstream owner's account.
+Forks are created on demand only for public projects with a recognized license
+at the source commit, or an exact license-specific acceptance from the GUI.
+An unknown license is never assumed to grant redistribution rights. No fork is
+created in the upstream owner's account.
 An existing repository with the same name must belong to the same fork network.
 
 Build branches use `quiver/knulli/<source-commit>-<device-profile-hash>`. Upstream

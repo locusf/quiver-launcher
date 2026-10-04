@@ -25,17 +25,26 @@ public partial class MessagePromptView : UserControl, IFeatureNavigationHandler
     public void Configure(LauncherSession session) => _session = session;
     private void FocusPrompt(bool preferCancel)
     {
+        MessagePromptScroll.Offset = default;
         _previousFocus = TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() as Control;
         var target = !Model.IsQuestion ? MessagePromptOkButton : preferCancel ? MessagePromptNoButton : MessagePromptYesButton;
         _index = Controls().IndexOf(target);
-        target.Focus();
+        if (!target.Focus())
+        {
+            Dispatcher.UIThread.Post(() =>
+            {
+                if (Model.IsOpen && !Controls().Any(control => control.IsFocused))
+                    RestoreFocus();
+            }, DispatcherPriority.Loaded);
+        }
     }
 
-    public async Task<MessagePromptResult> ShowAsync(string message, string title, bool isQuestion, bool preferCancelDefault = false, bool includeCancel = false)
+    public async Task<MessagePromptResult> ShowAsync(string message, string title, bool isQuestion, bool preferCancelDefault = false, bool includeCancel = false,
+        string acceptLabel = "Yes", string rejectLabel = "No", bool scrollBody = false)
     {
         if (!Dispatcher.UIThread.CheckAccess())
-            return await Dispatcher.UIThread.InvokeAsync(() => ShowAsync(message, title, isQuestion, preferCancelDefault, includeCancel));
-        return await Model.ShowAsync(message, title, isQuestion, preferCancelDefault, includeCancel, _session.Token);
+            return await Dispatcher.UIThread.InvokeAsync(() => ShowAsync(message, title, isQuestion, preferCancelDefault, includeCancel, acceptLabel, rejectLabel, scrollBody));
+        return await Model.ShowAsync(message, title, isQuestion, preferCancelDefault, includeCancel, _session.Token, acceptLabel, rejectLabel, scrollBody);
     }
 
     private List<Control> Controls() => new Control[]
@@ -66,6 +75,14 @@ public partial class MessagePromptView : UserControl, IFeatureNavigationHandler
     {
         if (!Model.IsOpen)
             return false;
+        if (Model.ScrollBody && direction is NavigationDirection.Up or NavigationDirection.Down)
+        {
+            var offset = MessagePromptScroll.Offset;
+            MessagePromptScroll.Offset = new Avalonia.Vector(offset.X,
+                Math.Clamp(offset.Y + (direction == NavigationDirection.Up ? -80 : 80),
+                    0, Math.Max(0, MessagePromptScroll.Extent.Height - MessagePromptScroll.Viewport.Height)));
+            return true;
+        }
         var controls = Controls();
         var focused = controls.FindIndex(c => c.IsFocused);
         if (focused >= 0)

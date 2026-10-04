@@ -88,6 +88,8 @@ the isolated build compute and artifacts.
 For recognized open-source projects, source fixes and diagnostics are checkpointed
 to a dedicated fork branch. Exhausted tool budgets start fresh reasoning rounds
 from that checkpoint rather than discarding progress.
+Unrecognized source licenses require an explicit, license-specific review and
+acceptance in the launcher before a public fork/build request can proceed.
 See [Knulli setup](docs/knulli.md)
 for installation, authentication, supported recipes, and limitations.
 

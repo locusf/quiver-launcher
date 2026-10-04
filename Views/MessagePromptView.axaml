@@ -20,7 +20,7 @@
 							   FontWeight="Bold"
 							   Foreground="{DynamicResource ThemeText}"
 							   TextWrapping="Wrap"/>
-					<ScrollViewer MaxHeight="360"
+					<ScrollViewer x:Name="MessagePromptScroll" MaxHeight="360"
 								  VerticalScrollBarVisibility="Auto">
 						<TextBlock x:Name="MessagePromptBodyText" Text="{Binding Body}"
 								   FontSize="13"
@@ -32,12 +32,12 @@
 								HorizontalAlignment="Right">
 						<Button x:Name="MessagePromptYesButton" IsVisible="{Binding IsQuestion}"
 								Classes="options message-prompt"
-								Content="Yes"
+								Content="{Binding AcceptLabel}"
 								MinWidth="100"
 								Click="MessagePromptYesButton_Click"/>
 						<Button x:Name="MessagePromptNoButton" IsVisible="{Binding IsQuestion}"
 								Classes="options message-prompt"
-								Content="No"
+								Content="{Binding RejectLabel}"
 								MinWidth="100"
 								Click="MessagePromptNoButton_Click"/>
 						<Button x:Name="MessagePromptCancelButton" IsVisible="{Binding IncludeCancel}"

@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 import json
+import base64
+import hashlib
 import subprocess
 import tempfile
 import unittest
@@ -21,6 +23,8 @@ class FakeGitHub:
         self.enabled = False
         self.license = "GPL-3.0"
         self.is_fork = True
+        self.license_text = b"Fixture license terms requiring review.\n"
+        self.license_exists = True
 
     def __call__(self, method, path, body=None, missing_ok=False):
         self.calls.append((method, path, body))
@@ -29,6 +33,11 @@ class FakeGitHub:
                     "private": False, "license": {"spdx_id": self.license}}
         if path == "user":
             return {"login": "builder"}
+        if path.startswith("repos/upstream/game/license?ref="):
+            if not self.license_exists:
+                return None
+            return {"license": {"spdx_id": self.license}, "path": "COPYING", "encoding": "base64",
+                    "content": base64.b64encode(self.license_text).decode()}
         if path == "repos/builder/game":
             if not self.fork_exists:
                 return None
@@ -93,7 +102,38 @@ class ForkStoreTests(unittest.TestCase):
 
     def test_unrecognized_license_never_creates_fork(self):
         self.api.license = "NOASSERTION"
-        with self.assertRaisesRegex(RuntimeError, "open-source license"):
+        with self.assertRaisesRegex(RuntimeError, "explicitly accept"):
+            self.store.ensure_fork()
+        self.assertFalse(any(method == "POST" for method, _, _ in self.api.calls))
+
+    def accepted_license(self):
+        return {"schema": 1, "repository": "upstream/game", "source_ref": self.head,
+                "license_path": "COPYING", "license_sha256": hashlib.sha256(self.api.license_text).hexdigest(),
+                "accept_terms": True, "accept_public_fork_and_artifacts": True}
+
+    def test_exact_explicit_acceptance_allows_unrecognized_license(self):
+        self.api.license = "NOASSERTION"
+        self.store.license_acceptance = self.accepted_license()
+        self.store.ensure_fork()
+        self.assertEqual(self.store.reviewed_license, self.api.license_text)
+        self.assertEqual(self.store.repository, "builder/game")
+
+    def test_acceptance_cannot_authorize_another_repository_commit_or_license(self):
+        self.api.license = "NOASSERTION"
+        for field, value in [("repository", "other/game"), ("source_ref", "b" * 40),
+                             ("license_path", "LICENSE"), ("license_sha256", "0" * 64),
+                             ("accept_terms", False), ("accept_public_fork_and_artifacts", False),
+                             ("accept_terms", 1), ("schema", True)]:
+            with self.subTest(field=field, value=value):
+                self.store.license_acceptance = dict(self.accepted_license(), **{field: value})
+                with self.assertRaisesRegex(RuntimeError, "does not match"):
+                    self.store.ensure_fork()
+        self.assertFalse(any(method == "POST" for method, _, _ in self.api.calls))
+
+    def test_missing_license_cannot_be_bypassed_by_acceptance(self):
+        self.api.license_exists = False
+        self.store.license_acceptance = self.accepted_license()
+        with self.assertRaisesRegex(RuntimeError, "missing rights"):
             self.store.ensure_fork()
         self.assertFalse(any(method == "POST" for method, _, _ in self.api.calls))
 

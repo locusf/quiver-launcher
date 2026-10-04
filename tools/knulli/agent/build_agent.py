@@ -415,6 +415,9 @@ async def run_fork_rounds(source, output, profile, store, run_round=None):
         report = json.loads(report_path.read_text())
         report["fork"] = location
         report["round"] = round_number
+        if store.license_acceptance:
+            report["license_acceptance"] = store.license_acceptance
+            (package / "quiver-reviewed-license.txt").write_bytes(store.reviewed_license)
         report_path.write_text(json.dumps(report, indent=2))
         return
 
@@ -567,7 +570,8 @@ def main():
         from fork_store import ForkStore, GitHubApi
         store = ForkStore(Path("game-source"), os.environ["SOURCE_REPOSITORY"],
                           os.environ["SOURCE_REF"], profile,
-                          GitHubApi(os.environ.pop("QUIVER_FORK_TOKEN", None)))
+                          GitHubApi(os.environ.pop("QUIVER_FORK_TOKEN", None)),
+                          license_acceptance=json.loads(os.environ.get("LICENSE_ACCEPTANCE") or "null"))
         if "--resolve-fork" in sys.argv[1:]:
             store.ensure_fork()
             store.write_checkout_outputs(Path(os.environ["GITHUB_OUTPUT"]))

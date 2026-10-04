@@ -86,7 +86,8 @@ public sealed class KnulliBuildService(HttpClient httpClient, KnulliBuildConfigu
     }
 
     public async Task<KnulliBuildArtifact> BuildAsync(KnulliBuildRecipe recipe,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Func<KnulliLicenseReview, Task<bool>>? confirmLicense = null)
     {
         configuration.Validate();
         var automatic = recipe.Id == "auto" && configuration.AttemptUnconfiguredGames &&
@@ -121,9 +122,25 @@ public sealed class KnulliBuildService(HttpClient httpClient, KnulliBuildConfigu
                     throw new InvalidDataException("GitHub did not resolve the game source to a full commit.");
                 recipe = recipe with { SourceRef = sha };
             }
+            KnulliLicenseAcceptance? acceptance = null;
+            if (automatic)
+            {
+                var review = await KnulliBuildLicense.InspectAsync(
+                    httpClient, Authenticate, recipe.Repository, recipe.SourceRef, ct).ConfigureAwait(false);
+                if (review != null)
+                {
+                    if (confirmLicense == null)
+                        throw new InvalidOperationException("This project requires license review and explicit acceptance in Quiver's GUI.");
+                    if (!await confirmLicense(review).ConfigureAwait(false))
+                        throw new KnulliLicenseDeclinedException();
+                    ct.ThrowIfCancellationRequested();
+                    acceptance = review.Accept();
+                }
+            }
+            var licenseAcceptance = acceptance == null ? "" : JsonSerializer.Serialize(acceptance);
             Directory.CreateDirectory(stateDirectory);
             var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-                $"{configuration.Repository}\n{configuration.Ref}\n{configuration.BuildRevision}\n{recipe.Id}\n{recipe.Repository}\n{recipe.SourceRef}\n{deviceProfile}")));
+                $"{configuration.Repository}\n{configuration.Ref}\n{configuration.BuildRevision}\n{recipe.Id}\n{recipe.Repository}\n{recipe.SourceRef}\n{deviceProfile}\n{licenseAcceptance}")));
             var statePath = Path.Combine(stateDirectory, key + ".json");
             PendingBuild pending;
             if (File.Exists(statePath))
@@ -138,7 +155,7 @@ public sealed class KnulliBuildService(HttpClient httpClient, KnulliBuildConfigu
                     @ref = configuration.Ref,
                     inputs = new { recipe = recipe.Id, source_ref = recipe.SourceRef,
                         source_repository = recipe.Repository, request_id = pending.RequestId,
-                        target_profile = deviceProfile }
+                        target_profile = deviceProfile, license_acceptance = licenseAcceptance }
                 });
                 using var response = await httpClient.SendAsync(request, ct);
                 response.EnsureSuccessStatusCode();

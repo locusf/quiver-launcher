@@ -8,13 +8,18 @@ public sealed class MessagePromptViewModel : ObservableViewModel
     private TaskCompletionSource<MessagePromptResult>? _completion;
     private string _title = "", _body = "";
     private bool _isOpen, _question, _includeCancel;
+    private string _acceptLabel = "Yes", _rejectLabel = "No";
+    public string AcceptLabel { get => _acceptLabel; private set => Set(ref _acceptLabel, value); }
+    public string RejectLabel { get => _rejectLabel; private set => Set(ref _rejectLabel, value); }
+    public bool ScrollBody { get; private set; }
     public string Title { get => _title; private set => Set(ref _title, value); }
     public string Body { get => _body; private set => Set(ref _body, value); }
     public bool IsOpen { get => _isOpen; private set => Set(ref _isOpen, value); }
     public bool IsQuestion { get => _question; private set => Set(ref _question, value); }
     public bool IncludeCancel { get => _includeCancel; private set => Set(ref _includeCancel, value); }
     public event Action<bool>? Opened;
-    public async Task<MessagePromptResult> ShowAsync(string message, string title, bool question, bool preferCancelDefault, bool includeCancel, CancellationToken token)
+    public async Task<MessagePromptResult> ShowAsync(string message, string title, bool question, bool preferCancelDefault, bool includeCancel, CancellationToken token,
+        string acceptLabel = "Yes", string rejectLabel = "No", bool scrollBody = false)
     {
         try { await _gate.WaitAsync(token); }
         catch (OperationCanceledException) { return MessagePromptResult.Cancel; }
@@ -25,6 +30,7 @@ public sealed class MessagePromptViewModel : ObservableViewModel
             completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
             _completion = completion;
             Title = title; Body = message; IsQuestion = question; IncludeCancel = includeCancel && question;
+            AcceptLabel = acceptLabel; RejectLabel = rejectLabel; ScrollBody = scrollBody;
             IsOpen = true;
             Opened?.Invoke(preferCancelDefault);
             return await completion.Task.WaitAsync(token);

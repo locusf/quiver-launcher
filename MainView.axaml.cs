@@ -476,7 +476,10 @@ namespace QuiverLauncher
         }
 
         private Task ShowMessageBoxAsync(string message, string title) => _prompts.ShowMessageBoxAsync(message, title);
-        internal Task<bool> ShowOverlayPromptAsync(string message, string title, bool isQuestion, bool preferCancelDefault = false) => _session.RunAsync(async () => await MessagePromptOverlay.ShowAsync(message, title, isQuestion, preferCancelDefault) == MessagePromptResult.Yes);
+        internal Task<bool> ShowOverlayPromptAsync(string message, string title, bool isQuestion, bool preferCancelDefault = false,
+            string acceptLabel = "Yes", string rejectLabel = "No", bool scrollBody = false) =>
+            _session.RunAsync(async () => await MessagePromptOverlay.ShowAsync(message, title, isQuestion, preferCancelDefault,
+                acceptLabel: acceptLabel, rejectLabel: rejectLabel, scrollBody: scrollBody) == MessagePromptResult.Yes);
         private Task<bool> ShowMessageBoxAsync(string message, string title, bool isQuestion, bool preferCancelDefault = false) => _prompts.ShowMessageBoxAsync(message, title, isQuestion, preferCancelDefault);
         private Task<MessagePromptResult> ShowChoicePromptAsync(string message, string title) => _prompts.ShowChoicePromptAsync(message, title);
         Task<bool> ISettingsFeatureHost.ShowMessageBoxAsync(string message, string title, bool question) => ShowMessageBoxAsync(message, title, question);

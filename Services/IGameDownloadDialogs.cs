@@ -10,6 +10,8 @@ public interface IGameDownloadDialogs
     Task ShowRateLimitExceededAsync();
     Task ShowGitLabRateLimitExceededAsync();
     Task ShowErrorAsync(string message, string title);
+    Task<bool> ConfirmBuildLicenseAsync(KnulliLicenseReview review) =>
+        throw new InvalidOperationException("This build requires explicit license acceptance in the Quiver GUI.");
     Task ShowBuildReportAsync(string message)
     {
         Console.WriteLine(message);
@@ -20,6 +22,9 @@ public interface IGameDownloadDialogs
 public sealed class AvaloniaGameDownloadDialogs : IGameDownloadDialogs
 {
     public static AvaloniaGameDownloadDialogs Instance { get; } = new();
+
+    public Task<bool> ConfirmBuildLicenseAsync(KnulliLicenseReview review) =>
+        GameDialogService.ShowBuildLicenseReviewAsync(review);
 
     public Task<bool> ConfirmDownloadWithoutRunnerAsync() =>
         GameDialogService.ShowWineNotFoundWarningAsync();

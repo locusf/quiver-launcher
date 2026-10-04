@@ -62,7 +62,7 @@ class GitHubApi:
 
 
 class ForkStore:
-    def __init__(self, source, upstream, source_ref, profile, api):
+    def __init__(self, source, upstream, source_ref, profile, api, license_acceptance=None):
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*", upstream):
             raise ValueError("Invalid upstream repository.")
         if not re.fullmatch(r"[0-9a-f]{40}", source_ref):
@@ -76,6 +76,41 @@ class ForkStore:
         self.repository = None
         self.head = None
         self.state = None
+        self.license_acceptance = license_acceptance
+        self.reviewed_license = None
+
+    def verify_license(self):
+        document = self.api("GET", f"repos/{self.upstream}/license?ref={self.source_ref}", missing_ok=True)
+        if document is None:
+            raise RuntimeError("No license file exists at the pinned source commit; user acceptance cannot supply missing rights.")
+        license_id = (document.get("license") or {}).get("spdx_id")
+        if license_id in OPEN_SOURCE_LICENSES:
+            self.license_acceptance = None
+            return
+        acceptance = self.license_acceptance
+        if not isinstance(acceptance, dict):
+            raise RuntimeError("Unrecognized source license. Review its terms and explicitly accept the public fork/build in Quiver's GUI.")
+        if document.get("encoding") != "base64":
+            raise RuntimeError("The pinned license text is unavailable for acceptance verification.")
+        content = base64.b64decode(document.get("content", ""))
+        if not content or len(content) > 120000 or not content.decode("utf-8").strip():
+            raise RuntimeError("The pinned license text is empty or exceeds the review limit.")
+        expected = {
+            "schema": 1, "repository": self.upstream, "source_ref": self.source_ref,
+            "license_path": document.get("path"),
+            "license_sha256": hashlib.sha256(content).hexdigest(),
+            "accept_terms": True, "accept_public_fork_and_artifacts": True,
+        }
+        if (type(acceptance.get("schema")) is not int or
+                acceptance.get("accept_terms") is not True or
+                acceptance.get("accept_public_fork_and_artifacts") is not True or
+                any(acceptance.get(key) != value for key, value in expected.items()
+                    if key != "repository") or
+                str(acceptance.get("repository", "")).lower() != self.upstream.lower()):
+            raise RuntimeError("License acceptance does not match this repository, source commit and exact license text. Review again in Quiver.")
+        self.license_acceptance = expected
+        self.reviewed_license = content
+        print("[license] Verified explicit user acceptance for the pinned license; restrictions still apply.", flush=True)
 
     def git(self, *args):
         result = subprocess.run(["git", "-C", str(self.source), *args],
@@ -87,9 +122,9 @@ class ForkStore:
     def ensure_fork(self):
         upstream = self.api("GET", f"repos/{self.upstream}")
         self.upstream = upstream["full_name"]
-        license_id = (upstream.get("license") or {}).get("spdx_id")
-        if upstream.get("private") or license_id not in OPEN_SOURCE_LICENSES:
-            raise RuntimeError("Automatic forks require a public repository with a recognized open-source license.")
+        if upstream.get("private"):
+            raise RuntimeError("Automatic game forks require a public source repository.")
+        self.verify_license()
         owner = self.api("GET", "user")["login"]
         if self.upstream.split("/")[0].lower() == owner.lower():
             raise RuntimeError("Refusing to use the source owner's repository as a build fork.")
@@ -200,6 +235,7 @@ class ForkStore:
             "round": engine.round_number, "attempts": len(engine.attempts), "tool_calls": engine.calls,
             "last_build": engine.last_outcome, "last_tool_error": engine.last_tool_error,
             "summary": engine.last_summary, "previous_commit": self.head,
+            "license_acceptance": self.license_acceptance,
         }
         metadata = {STATE_PATH: json.dumps(state, indent=2)}
         if engine.attempts:

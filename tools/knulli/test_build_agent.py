@@ -293,7 +293,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tool_budget_pushes_fork_then_starts_fresh_round_with_context(self):
         checkpoints = []
-        store = SimpleNamespace(state=None, repository="builder/game", branch="quiver/test",
+        store = SimpleNamespace(state=None, repository="builder/game", branch="quiver/test", license_acceptance=None,
                                 ensure_fork=lambda: None, restore=lambda: None)
 
         def checkpoint(engine, status):
@@ -330,7 +330,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_fork_continuation_rounds_are_bounded_and_progress_is_saved(self):
         checkpoints = []
-        store = SimpleNamespace(state={"round": 8}, repository="builder/game", branch="quiver/test",
+        store = SimpleNamespace(state={"round": 8}, repository="builder/game", branch="quiver/test", license_acceptance=None,
                                 ensure_fork=lambda: {"round": 8}, restore=lambda: None)
 
         def checkpoint(engine, status):

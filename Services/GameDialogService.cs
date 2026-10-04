@@ -13,6 +13,24 @@ namespace QuiverLauncher.Services;
 
 public static class GameDialogService
 {
+    public static async Task<bool> ShowBuildLicenseReviewAsync(KnulliLicenseReview review)
+    {
+        if (!HasInteractiveUi())
+            throw new InvalidOperationException("Open Quiver's GUI to review and accept this project's build license.");
+        return await Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            var view = TryGetMainView()
+                ?? throw new InvalidOperationException("The launcher license-review UI is unavailable.");
+            if (!await view.ShowOverlayPromptAsync(review.ReviewMessage, "Review source license",
+                    isQuestion: true, preferCancelDefault: true,
+                    acceptLabel: "Continue", rejectLabel: "Cancel", scrollBody: true))
+                return false;
+            return await view.ShowOverlayPromptAsync(review.AcceptanceMessage, "License acceptance",
+                isQuestion: true, preferCancelDefault: true,
+                acceptLabel: "Accept & build", rejectLabel: "Cancel", scrollBody: true);
+        });
+    }
+
     public static bool IsGitHubRateLimitError(Exception ex) => IsRateLimitError(ex);
 
     public static bool IsRateLimitError(Exception ex)

@@ -26,6 +26,9 @@ on:
       target_profile:
         description: Observed Knulli hardware and controller profile JSON (auto only)
         type: string
+      license_acceptance:
+        description: Explicit GUI acceptance bound to repository, source commit and license SHA-256
+        type: string
 
 permissions:
   contents: read
@@ -105,6 +108,7 @@ jobs:
           QUIVER_FORK_TOKEN: ${{ secrets.QUIVER_FORK_TOKEN }}
           SOURCE_REPOSITORY: ${{ inputs.source_repository }}
           SOURCE_REF: ${{ inputs.source_ref }}
+          LICENSE_ACCEPTANCE: ${{ inputs.license_acceptance }}
         run: python3 tools/knulli/agent/build_agent.py --resolve-fork
       - name: Check out saved game fork directly
         uses: actions/checkout@v4
@@ -135,6 +139,7 @@ jobs:
           QUIVER_FORK_TOKEN: ${{ secrets.QUIVER_FORK_TOKEN }}
           SOURCE_REPOSITORY: ${{ inputs.source_repository }}
           SOURCE_REF: ${{ inputs.source_ref }}
+          LICENSE_ACCEPTANCE: ${{ inputs.license_acceptance }}
         run: |
           set -o pipefail
           mkdir -p attempt-output
