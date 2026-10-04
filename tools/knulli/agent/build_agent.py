@@ -576,7 +576,7 @@ async def run_agent(engine):
         async with CopilotClient(mode="empty", github_token=token, use_logged_in_user=False,
                                  working_directory=session_dir, base_directory=session_dir) as client:
             async with await client.create_session(
-                model=os.environ.get("COPILOT_MODEL", "gpt-5.4"),
+                model=os.environ.get("COPILOT_MODEL", "claude-sonnet-5"),
                 reasoning_effort="high", tools=tools, available_tools=[t.name for t in tools],
                 on_permission_request=lambda *_: PermissionDecisionDeniedNoApprovalRuleAndCouldNotRequestFromUser(),
                 system_message={"mode": "replace", "content": SYSTEM_PROMPT},

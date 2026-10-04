@@ -150,7 +150,7 @@ build decision maker; this is not a self-hosted agent server.
 
 Configure the repository secret **`COPILOT_GITHUB_TOKEN`** with a credential
 authorized for Copilot, separate from the device's Actions token. The account
-must have access to the configured model (`gpt-5.4`, high reasoning effort).
+must have access to the configured model (`claude-sonnet-5`, high reasoning effort).
 Agent runs may consume Copilot usage. A missing/unauthorized credential fails
 explicitly; there is no silent fallback to the old scripted builder. The pinned
 SDK and its verified runtime are installed only on the runner, not on Knulli.
