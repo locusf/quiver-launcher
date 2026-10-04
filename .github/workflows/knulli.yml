@@ -42,10 +42,24 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Restore cache-transfer verification snapshot
+        id: verification-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/quiver-ccache-verification
+          key: knulli-ccache-check-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/knulli/cross/**') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            knulli-ccache-check-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/knulli/cross/**') }}-
       - name: Build the isolated compiler image
         run: docker build -t quiver-knulli-cross tools/knulli/cross
       - name: Verify C and C++ cache reuse and invalidation
-        run: python3 tools/knulli/verify_ccache.py
+        run: python3 tools/knulli/verify_ccache.py --cache-directory "${{ runner.temp }}/quiver-ccache-verification"
+      - name: Save cache-transfer verification snapshot
+        if: always() && steps.verification-cache.outputs.cache-primary-key != ''
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/quiver-ccache-verification
+          key: ${{ steps.verification-cache.outputs.cache-primary-key }}
 
   launcher:
     if: github.event_name == 'push' || inputs.recipe == 'launcher'

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Measure cache hits and header invalidation across fresh, isolated compiler containers."""
 import json
+import argparse
 from pathlib import Path
 import tempfile
 import sys
@@ -45,12 +46,12 @@ exit {exit_code}
 """
 
 
-def main():
+def main(cache_directory=None):
     with tempfile.TemporaryDirectory(prefix="quiver-ccache-check-") as temporary:
         root = Path(temporary)
         source = root / "source"
         source.mkdir()
-        cache = root / "ccache"
+        cache = cache_directory or (root / "ccache")
         outputs = []
         # The first completed compilations survive a failed recipe; the third changes a header.
         for index, (value, result) in enumerate(((1, 1), (1, 0), (2, 0)), 1):
@@ -78,8 +79,11 @@ def main():
         if stats(outputs[2] / "meson.stats").get("cache_miss", 0) <= previous.get("cache_miss", 0):
             raise RuntimeError("Changed headers did not produce cache misses.")
         print(json.dumps({"cache_hits_on_second_attempt": hit_counts,
-                          "failed_attempt_cache_reused": True, "header_change_invalidated": True}))
+                          "failed_attempt_cache_reused": True, "header_change_invalidated": True,
+                          "cache_hits_restored_from_earlier_run": hits(stats(outputs[0] / "before.stats"))}))
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cache-directory", type=Path)
+    main(parser.parse_args().cache_directory)
