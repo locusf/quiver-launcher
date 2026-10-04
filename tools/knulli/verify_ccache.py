@@ -23,8 +23,10 @@ def script(value, exit_code):
     return f"""set -eu
 mkdir -p /tmp/game
 cd /tmp/game
+"$HOST_CXX" -std=c++17 /opt/cross/toolchain-check/host-generator.cpp -o host-generator
+./host-generator host-generated.h
 printf '#define VALUE {value}\\n' > value.h
-printf '#include "value.h"\\nint value(void) {{ return VALUE; }}\\n' > direct.c
+printf '#include "value.h"\\n#include "host-generated.h"\\nint value(void) {{ return VALUE + HOST_GENERATED_VALUE; }}\\n' > direct.c
 printf '#include "value.h"\\nint cpp_value() {{ return VALUE; }}\\n' > direct.cpp
 ccache --print-stats > /output/before.stats
 aarch64-linux-gnu-gcc -O2 -c direct.c -o /output/direct.o

@@ -9,7 +9,7 @@ RUN dpkg --add-architecture arm64 \
        > /etc/apt/sources.list.d/arm64.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
-       gcc-aarch64-linux-gnu g++-aarch64-linux-gnu ccache make cmake meson ninja-build \
+       gcc g++ gcc-aarch64-linux-gnu g++-aarch64-linux-gnu ccache make cmake meson ninja-build \
        pkg-config python3 file git autoconf automake libtool \
        libsdl2-dev:arm64 libsdl2-image-dev:arm64 libsdl2-mixer-dev:arm64 \
        libsdl2-ttf-dev:arm64 libfreetype6-dev:arm64 libpng-dev:arm64 \
@@ -26,6 +26,7 @@ RUN cmake -S /opt/cross/toolchain-check -B /tmp/toolchain-check \
     && cmake --build /tmp/toolchain-check \
     && aarch64-linux-gnu-readelf -h /tmp/toolchain-check/check-toolchain | grep 'Machine:.*AArch64'
 ENV CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++ AR=aarch64-linux-gnu-ar
+ENV HOST_CC=/usr/bin/gcc HOST_CXX=/usr/bin/g++ CC_FOR_BUILD=/usr/bin/gcc CXX_FOR_BUILD=/usr/bin/g++
 ENV PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
 ENV CFLAGS="-O2 -mcpu=cortex-a53 -mtune=cortex-a53 -fsigned-char"
 ENV CXXFLAGS="-O2 -mcpu=cortex-a53 -mtune=cortex-a53 -fsigned-char"

@@ -183,6 +183,14 @@ dependency detection rather than remove translations, Unicode handling or other
 required functionality to get a binary. Checkpoints remain reviewable work in
 progress, not permission to merge behavioral regressions.
 
+Both native x86-64 `gcc`/`g++` and ARM64 cross-compilers are installed. Native
+code generators use `HOST_CC`/`HOST_CXX` (also `CC_FOR_BUILD`/`CXX_FOR_BUILD`);
+`CC`/`CXX` remain ARM64 for game builds. Separate host-tool configurations must
+clear ARM-specific flags and `PKG_CONFIG_LIBDIR` and omit the cross-toolchain
+file. Image validation compiles and executes a native C++ generator, then
+consumes its generated header while linking an ARM64 test program. This catches
+missing native `cc1plus` or C++ runtime dependencies before an agent starts.
+
 If the agent ends a turn after a failed or unfinished build, the orchestrator
 resumes reasoning in the same session with the last build error, compiler log,
 tool error and remaining budgets. Up to six reasoning turns are allowed; they

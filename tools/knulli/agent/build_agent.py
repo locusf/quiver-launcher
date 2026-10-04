@@ -462,6 +462,15 @@ the image smoke-tests their CMake discovery and linkage. Do not remove Boost fun
 Container: Ubuntu 22.04, ARM64 gcc/g++, cmake/ninja/meson/autotools/make, pkg-config,
 SDL2/image/mixer/ttf, GL/EGL, freetype/png/jpeg/openal/ogg/vorbis/curl/zlib development libraries.
 CC/CXX, CFLAGS/CXXFLAGS and PKG_CONFIG_LIBDIR already select ARM64 Cortex-A53.
+Native x86-64 gcc/g++ are installed for code generators that must run on the build host.
+Use HOST_CC=/usr/bin/gcc and HOST_CXX=/usr/bin/g++ (also CC_FOR_BUILD/CXX_FOR_BUILD).
+For a separate native generator build, set CC="$HOST_CC" CXX="$HOST_CXX", clear
+ARM-only CFLAGS/CXXFLAGS/LDFLAGS and PKG_CONFIG_LIBDIR, and do not apply the ARM64
+CMake/Meson cross file. Keep these overrides scoped to that host-tool build;
+the game must still use the ARM64 compilers. Do not run ARM64 generators directly
+on the x86-64 host or probe archivers such as ranlib as if they were compilers.
+The image builds and runs a native C++ generator and consumes its output in its
+ARM64 link smoke test, so native cc1plus/libstdc++ availability is verified.
 ccache is enabled for the supplied CMake/Meson toolchains and compiler names on PATH.
 /ccache is a shared compiler-cache directory preserved across attempts and fresh agent
 rounds, including failed builds, and transferred to later GitHub runs. Leave it intact.
