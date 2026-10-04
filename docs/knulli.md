@@ -159,7 +159,10 @@ controller analysis, exact source citations and limitations) and
 logs are available in `knulli-auto-report-<request-id>`. Controller analysis must
 identify native/adapted/unsupported input, distinguish normalized SDL
 GameController indices from physical Joystick indices, and cite actual source
-lines. It must never label compilation as device or controller verification.
+lines. Native/adapted claims require separate citations and explanations for
+initialization/platform guards and the selected binding table, not just event
+handlers or the existence of a joystick. It must never label compilation as
+device or controller verification.
 Both `runtime_verified` fields are enforced as `false` until separate device
 testing occurs.
 

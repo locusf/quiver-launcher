@@ -54,6 +54,15 @@ def validate_controller_report(report, source):
     evidence = report.get("evidence")
     if not isinstance(evidence, list) or not 1 <= len(evidence) <= 8:
         raise ValueError("Provide 1-8 source citations for controller conclusions.")
+    roles = {item.get("role") for item in evidence}
+    if "api" not in roles:
+        raise ValueError("Cite the input API with role=api.")
+    if report["support"] != "unsupported":
+        if not {"activation", "bindings"}.issubset(roles):
+            raise ValueError("Native/adapted support requires separate activation-guard and binding-table citations, not just event handlers.")
+        for field in ("activation", "bindings"):
+            if not isinstance(report.get(field), str) or not 1 <= len(report[field]) <= 4000:
+                raise ValueError(f"Explain the target-specific {field} analysis.")
     for item in evidence:
         line = item["line"]
         quote = item["quote"]
@@ -267,9 +276,17 @@ Controller report must cite exact ORIGINAL source lines that establish the input
 SDL GameController button numbers are standardized; SDL Joystick buttons are physical.
 Compare with the observed device mappings, not guessed indices. Keyboard-only engines need
 an explicit input adaptation or support=unsupported; compilation is not controller support.
+Do not infer native support from the existence of joystick event handlers or device shape.
+Trace initialization and use/enabled/platform guards: can the controller path actually run
+on Linux with these compiler flags? Read the selected default binding table, not a
+different platform's table. Every physical axis/button/hat index must match the observed
+device. A four-axis device has indices 0-3, never 4 or 5. SDL GameController mappings do NOT
+remap physical SDL_Joystick event indices. Patch guards AND mismatched raw bindings or
+report unsupported. For native/adapted support include activation and bindings explanation
+strings, plus source citations with roles api, activation, and bindings.
 Choose api from sdl2-gamecontroller,sdl2-joystick,keyboard,other,none; support from
 native,adapted,unsupported. Explain adaptations/limitations in notes and include evidence
-as [{path,line,quote}]. No interactive controller calibration or device writes are permitted.
+as [{path,line,quote,role}]. No interactive controller calibration or device writes are permitted.
 
 Call finish only after attempt_build validates a package. It must summarize build choices,
 controller/graphics compatibility and what remains unverified. If blocked, say why.
@@ -310,9 +327,11 @@ async def run_agent(engine):
             "script": {"type": "string"}, "entrypoint": {"type": "string"},
             "controller": {"type": "object", "properties": {
                 "api": {"type": "string"}, "support": {"type": "string"}, "notes": {"type": "string"},
+                "activation": {"type": "string"}, "bindings": {"type": "string"},
                 "evidence": {"type": "array", "items": {"type": "object", "properties": {
-                    "path": {"type": "string"}, "line": {"type": "integer"}, "quote": {"type": "string"}},
-                    "required": ["path", "line", "quote"]}}},
+                    "path": {"type": "string"}, "line": {"type": "integer"}, "quote": {"type": "string"},
+                    "role": {"type": "string", "enum": ["api", "activation", "bindings"]}},
+                    "required": ["path", "line", "quote", "role"]}}},
                 "required": ["api", "support", "notes", "evidence"]}},
              ["script", "entrypoint", "controller"], engine.attempt_build),
         tool("finish", "Publish a validated build with compatibility report",

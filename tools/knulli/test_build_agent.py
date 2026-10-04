@@ -25,10 +25,17 @@ class AgentTests(unittest.TestCase):
         self.source = root / "source"
         self.output = root / "output"
         self.source.mkdir()
-        (self.source / "input.c").write_text("SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_A);\n")
+        (self.source / "input.c").write_text(
+            "SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_A);\n"
+            "int input_enabled = 1;\n"
+            "int confirm = SDL_CONTROLLER_BUTTON_A;\n")
         (self.source / "LICENSE").write_text("Fixture license notice\n")
         self.report = {"api": "sdl2-gamecontroller", "support": "native", "notes": "Uses normalized SDL2 buttons.",
-                       "evidence": [{"path": "input.c", "line": 1, "quote": "SDL_GameControllerGetButton"}]}
+                       "activation": "Input is enabled on all targets.", "bindings": "Uses logical SDL A.",
+                       "evidence": [
+                           {"path": "input.c", "line": 1, "quote": "SDL_GameControllerGetButton", "role": "api"},
+                           {"path": "input.c", "line": 2, "quote": "input_enabled = 1", "role": "activation"},
+                           {"path": "input.c", "line": 3, "quote": "SDL_CONTROLLER_BUTTON_A", "role": "bindings"}]}
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -90,8 +97,16 @@ class AgentTests(unittest.TestCase):
 
     def test_fabricated_input_evidence_is_rejected_before_build(self):
         engine = agent.BuildAgent(self.source, self.output, {}, self.successful_build)
-        report = dict(self.report, evidence=[{"path": "input.c", "line": 1, "quote": "SDL_Fake"}])
+        report = dict(self.report, evidence=[
+            dict(item, quote="SDL_Fake") if item["role"] == "api" else item for item in self.report["evidence"]])
         with self.assertRaisesRegex(ValueError, "does not match"):
+            engine.attempt_build("make", "game", report)
+        self.assertEqual(len(engine.attempts), 0)
+
+    def test_event_handlers_alone_do_not_establish_controller_support(self):
+        engine = agent.BuildAgent(self.source, self.output, {}, self.successful_build)
+        report = dict(self.report, evidence=self.report["evidence"][:1])
+        with self.assertRaisesRegex(ValueError, "activation-guard"):
             engine.attempt_build("make", "game", report)
         self.assertEqual(len(engine.attempts), 0)
 
