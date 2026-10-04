@@ -11,16 +11,16 @@ public static class PlatformCapabilities
 
     public static string InstalledAppRemovalLabel => IsMobile ? "Uninstall" : "Delete";
 
-    public static bool SupportsTray => !IsMobile;
+    public static bool SupportsTray => !IsMobile && !KnulliRuntime.IsEnabled;
 
-    public static bool SupportsVelopack => !IsMobile;
+    public static bool SupportsVelopack => !IsMobile && !KnulliRuntime.IsEnabled;
 
     public static bool SupportsFolderInstall => !IsMobile;
 
-    public static bool SupportsWine => OperatingSystem.IsLinux() && !IsMobile;
+    public static bool SupportsWine => OperatingSystem.IsLinux() && !IsMobile && !KnulliRuntime.IsEnabled;
 
     public static bool SupportsSteamShortcuts =>
-        !IsMobile && (OperatingSystem.IsWindows() || OperatingSystem.IsLinux());
+        !IsMobile && !KnulliRuntime.IsEnabled && (OperatingSystem.IsWindows() || OperatingSystem.IsLinux());
 
     public static bool SupportsModsFolder => !IsMobile;
 

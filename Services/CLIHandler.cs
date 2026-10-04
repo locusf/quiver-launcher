@@ -606,7 +606,8 @@ namespace QuiverLauncher
                     Console.WriteLine();
                 }
 
-                if (game.SelectedDownload == null)
+                var hasKnulliRecipe = KnulliBuildService.ForGame(game, _gameManager.HttpClient, settings) != null;
+                if (game.SelectedDownload == null && !hasKnulliRecipe)
                 {
                     WriteColor(game.DownloadChoices?.NeedsChoice == true
                         ? "Download selection is required. Open Quiver to choose a file."
@@ -614,7 +615,8 @@ namespace QuiverLauncher
                     return 1;
                 }
 
-                var isFlatpakDownload = GameInstallationService.IsFlatpakAsset(game.SelectedDownload.name);
+                var isFlatpakDownload = game.SelectedDownload != null &&
+                    GameInstallationService.IsFlatpakAsset(game.SelectedDownload.name);
                 var expectedVersion = game.LatestVersion;
                 var downloadTask = game.PerformActionAsync(
                     _gameManager.HttpClient,
@@ -626,7 +628,7 @@ namespace QuiverLauncher
                 int timeout = 600; // 10 minutes
                 int waited = 0;
 
-                while (waited < timeout || isFlatpakDownload)
+                while (waited < timeout || isFlatpakDownload || hasKnulliRecipe)
                 {
                     if (downloadTask.IsCompleted) break;
                     // Check if installation completed
@@ -656,7 +658,7 @@ namespace QuiverLauncher
                 Console.WriteLine();
                 Console.WriteLine();
 
-                if (waited >= timeout && !isFlatpakDownload)
+                if (waited >= timeout && !isFlatpakDownload && !hasKnulliRecipe)
                 {
                     return PrintError("Download timed out.");
                 }
@@ -928,4 +930,3 @@ namespace QuiverLauncher
         }
     }
 }
-

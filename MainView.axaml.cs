@@ -113,7 +113,16 @@ namespace QuiverLauncher
         private void CloseAfterLaunchIfNeeded(bool launched) => _desktopHost?.CloseAfterLaunch(launched);
         public void HideToTray() => _desktopHost?.HideToTray();
         public void RestoreFromTray() => _desktopHost?.RestoreFromTray();
-        public void RequestExit() => _desktopHost?.RequestExit();
+        public async void RequestExit()
+        {
+            if (KnulliRuntime.IsEnabled)
+            {
+                try { await KnulliRuntime.ExitAsync(); }
+                catch (Exception ex) { CrashLog.Log("Knulli exit", ex); }
+            }
+            else
+                _desktopHost?.RequestExit();
+        }
         public void HandleClosing(WindowClosingEventArgs e) => _desktopHost?.HandleClosing(e);
         public void HandleHostWindowStateChanged(WindowState oldState, WindowState newState) => _desktopHost?.HandleStateChanged(newState);
         private bool IsHostActive => HostWindow?.IsActive ?? true;

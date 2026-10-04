@@ -1,0 +1,97 @@
+name: Knulli builds
+run-name: knulli-${{ inputs.request_id || github.run_id }}
+
+on:
+  push:
+    paths:
+      - '.github/workflows/knulli.yml'
+      - 'tools/knulli/**'
+  workflow_dispatch:
+    inputs:
+      recipe:
+        description: Package to build
+        type: choice
+        options: [launcher, '2048']
+        default: launcher
+        required: true
+      source_ref:
+        description: Full source commit (2048 only)
+        type: string
+      request_id:
+        description: Launcher correlation ID
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  launcher:
+    if: github.event_name == 'push' || inputs.recipe == 'launcher'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Test Knulli integration
+        run: |
+          dotnet test QuiverLauncher.Tests/QuiverLauncher.Tests.csproj -c Release --filter 'FullyQualifiedName~Knulli'
+          python3 -m unittest discover -s tools/knulli -p 'test_*.py'
+      - name: Publish ARM64 launcher
+        run: |
+          dotnet publish QuiverLauncher.Desktop/QuiverLauncher.Desktop.csproj -c Release -r linux-arm64 --self-contained true -p:PublishTrimmed=false -o package/quiver-launcher
+          cp tools/knulli/supervisor.py package/quiver-launcher/
+          cp 'tools/knulli/Quiver Launcher.sh' package/
+          chmod +x 'package/Quiver Launcher.sh' package/quiver-launcher/QuiverLauncher.Desktop
+          tar -C package -czf QuiverLauncher-knulli-arm64.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QuiverLauncher-knulli-arm64
+          path: QuiverLauncher-knulli-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+  game:
+    if: github.event_name == 'workflow_dispatch' && inputs.recipe == '2048'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - name: Validate dispatch inputs
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
+          REQUEST_ID: ${{ inputs.request_id }}
+        run: |
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$REQUEST_ID" =~ ^[0-9a-f]{32}$ ]]
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: libretro/libretro-2048
+          ref: ${{ inputs.source_ref }}
+          path: source
+          persist-credentials: false
+      - name: Install ARM64 cross compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Build the libretro game core
+        run: |
+          make -C source -f Makefile.libretro -j2 platform=unix \
+            CC="aarch64-linux-gnu-gcc -mcpu=cortex-a53 -mtune=cortex-a53 -fsigned-char"
+          aarch64-linux-gnu-readelf -h source/2048_libretro.so | grep 'Machine:.*AArch64'
+          mkdir -p payload
+          cp source/2048_libretro.so payload/
+          cp source/COPYING payload/
+          cp tools/knulli/2048.sh payload/launch.sh
+          chmod +x payload/launch.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: knulli-2048-${{ inputs.request_id }}
+          path: payload/
+          if-no-files-found: error
+          retention-days: 30

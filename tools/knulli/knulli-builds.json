@@ -1,0 +1,11 @@
+{
+  "Repository": "locusf/quiver-launcher",
+  "Ref": "agents/knulli-quiver-launcher-setup",
+  "Recipes": [
+    {
+      "Id": "2048",
+      "Repository": "libretro/libretro-2048",
+      "SourceRef": "39333f7b13dc4daea7c151d9c38d22b961246343"
+    }
+  ]
+}

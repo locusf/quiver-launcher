@@ -141,6 +141,12 @@ public static class GameLaunchService
                 ? gamePath
                 : (Path.GetDirectoryName(executablePath) ?? gamePath));
 
+            if (KnulliRuntime.IsEnabled)
+            {
+                await KnulliRuntime.HandOffAsync(startInfo);
+                return true;
+            }
+
             var gameProcess = Process.Start(startInfo);
             if (gameProcess == null)
             {

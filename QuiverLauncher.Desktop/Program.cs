@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls.Platform;
+using Avalonia.LinuxFramebuffer.Input.NullInput;
 using QuiverLauncher.Services;
 using System.Runtime.InteropServices;
 using Velopack;
@@ -21,6 +22,33 @@ internal static class Program
     public static int Main(string[] args)
     {
         AppInstallLaunch.Current = new DesktopAppInstallLaunchService();
+
+        if (args.Contains("--knulli"))
+            Environment.SetEnvironmentVariable("QUIVER_KNULLI", "1");
+        if (KnulliRuntime.IsEnabled)
+        {
+            QuiverLauncherPaths.OverrideUserDataRoot =
+                Environment.GetEnvironmentVariable("QUIVER_DATA_HOME") ?? "/userdata/system/quiver-launcher";
+            QuiverLauncherPaths.EnsureUserDataRootExists();
+        }
+        if (args.Contains("--knulli"))
+        {
+            DefaultMenuInteractionHandler.MenuShowDelay = TimeSpan.Zero;
+            try
+            {
+                return AppBuilder.Configure<App>()
+                    .UseHarfBuzz()
+                    .WithInterFont()
+                    .LogToTrace()
+                    .StartLinuxFbDev(args, "/dev/fb0", scaling: 1, inputBackend: new NullInputBackend());
+            }
+            catch (Exception ex)
+            {
+                CrashLog.Log("Knulli startup", ex);
+                Console.Error.WriteLine(ex);
+                return 1;
+            }
+        }
 
         var velopack = VelopackApp.Build();
         if (!OperatingSystem.IsWindows())

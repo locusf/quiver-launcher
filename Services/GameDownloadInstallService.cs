@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using Avalonia.Threading;
 using QuiverLauncher.Core.Models;
 using QuiverLauncher.Core.Services;
@@ -57,6 +58,8 @@ public static class GameDownloadInstallService
 
             var gamePath = game.GetInstallPath(gamesFolder);
             var versionFile = Path.Combine(gamePath, "version.txt");
+            var build = KnulliBuildService.ForGame(game, httpClient, settings);
+            KnulliBuildArtifact? buildArtifact = null;
 
             if (latestRelease == null)
             {
@@ -79,14 +82,16 @@ public static class GameDownloadInstallService
                     // An unsuccessful request has no releases too; it is not evidence
                     // that the repository has no downloads (for any platform).
                     releaseResult.EnsureSuccess();
-                    if (releaseResult.Releases.Count == 0)
+                    if (releaseResult.Releases.Count == 0 && build == null)
                     {
                         ResetNotInstalled(game);
                         await dialogs.ShowErrorAsync($"No releases found for {game.Name}.", "No Releases");
                         return;
                     }
 
-                    latestRelease = GameInfo.SelectLatestRelease(
+                    latestRelease = releaseResult.Releases.Count == 0
+                        ? build!.Value.Recipe.Release
+                        : GameInfo.SelectLatestRelease(
                         releaseResult.Releases,
                         game.PreferredVersion,
                         game.InstalledVersion,
@@ -113,6 +118,22 @@ public static class GameDownloadInstallService
             game.ApplyCachedRelease(latestRelease.tag_name, latestRelease);
             var choices = GameDownloadService.Prepare(game, latestRelease, settings);
             var asset = game.SelectedDownload ?? choices.Automatic;
+            if (asset == null && !choices.NeedsChoice && build is { } fallback)
+            {
+                game.IsInstallIndeterminate = true;
+                try
+                {
+                    buildArtifact = await fallback.Service.BuildAsync(
+                        fallback.Recipe, LauncherSession.OperationCancellation).ConfigureAwait(false);
+                    latestRelease = fallback.Recipe.Release;
+                    asset = new GitHubAsset
+                    {
+                        name = $"knulli-{fallback.Recipe.Id}-arm64.zip",
+                        browser_download_url = buildArtifact.Url
+                    };
+                }
+                finally { game.IsInstallIndeterminate = false; }
+            }
             if (asset == null)
             {
                 if (!choices.NeedsChoice)
@@ -183,6 +204,8 @@ public static class GameDownloadInstallService
             try
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get, asset.browser_download_url);
+                if (buildArtifact != null)
+                    build!.Value.Service.AuthenticateArtifactRequest(request);
                 using var downloadResponse = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead)
                     .ConfigureAwait(false);
                 downloadResponse.EnsureSuccessStatusCode();
@@ -234,6 +257,14 @@ public static class GameDownloadInstallService
 
                     await fs.FlushAsync().ConfigureAwait(false);
                     fs.Flush(true);
+                }
+
+                if (buildArtifact != null)
+                {
+                    await using var archive = File.OpenRead(downloadPath);
+                    var digest = Convert.ToHexString(await SHA256.HashDataAsync(archive));
+                    if (!digest.Equals(buildArtifact.Sha256, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException("The GitHub build artifact failed SHA-256 verification.");
                 }
 
                 game.DownloadProgress = 90;
