@@ -98,6 +98,7 @@ class BuildAgent:
         self.runner = runner or self.run_container
         self.attempts = []
         self.calls = 0
+        self.inspections = 0
         self.result = None
         self.output.mkdir(parents=True, exist_ok=True)
 
@@ -110,18 +111,24 @@ class BuildAgent:
         if self.calls > MAX_TOOL_CALLS:
             raise RuntimeError("Agent tool budget exhausted.")
 
-    def list_source(self, directory="."):
+    def inspect_budget(self):
         self.count_call()
+        self.inspections += 1
+        if self.inspections > 20:
+            raise RuntimeError("Inspection budget reached. Call attempt_build now using collected evidence; investigate further after compiler feedback.")
+
+    def list_source(self, directory="."):
+        self.inspect_budget()
         path = source_path(self.source, directory)
         return sorted(item.name + ("/" if item.is_dir() else "") for item in path.iterdir()
                       if item.name != ".git")[:300]
 
     def inspect_source(self, path, start=1, count=120):
-        self.count_call()
+        self.inspect_budget()
         return read_source(self.source, path, start, count)
 
     def search_source(self, text, directory="."):
-        self.count_call()
+        self.inspect_budget()
         if not isinstance(text, str) or not 1 <= len(text) <= 100:
             raise ValueError("Search for a literal string of 1-100 characters.")
         root = source_path(self.source, directory)
@@ -172,6 +179,7 @@ class BuildAgent:
         (directory / "recipe").mkdir()
         (directory / "files").mkdir()
         self.attempts.append(directory)
+        self.inspections = 0
         (directory / "recipe" / "build.sh").write_text("set -euo pipefail\n" + script)
         (directory / "recipe" / "target-profile.json").write_text(json.dumps(self.profile))
         self.result = None
@@ -224,6 +232,12 @@ Do not claim runtime verification: you cannot run on the handheld.
 
 Inspect build files and input code, then call attempt_build with a complete bash script.
 Each attempt starts a fresh offline, unprivileged container. At most five attempts are allowed.
+Use at most 20 source-inspection calls before attempting a build; prefer 5-10.
+Do not exhaust time auditing every input handler. Find a representative input citation,
+attempt the build, then reason from compiler feedback. Complex input adaptations may be
+reported as unsupported with precise follow-up steps rather than blocking compilation.
+All source-tool paths are RELATIVE to the checkout; use "." for its root, not "/source".
+inspect_source takes 1-based start lines and at most 200 lines per call.
 Adapt flags, source patches, installed data, and controller setup based on actual errors.
 Do not simply retry the same script. No package/network installation is available during builds.
 Explain missing dependencies if the supplied toolchain cannot satisfy them.
@@ -262,6 +276,7 @@ async def run_agent(engine):
     def tool(name, description, properties, required, handler, terminal=False):
         async def invoke(invocation):
             try:
+                engine.record("tool_call", tool=name, arguments=invocation.arguments)
                 result = await asyncio.to_thread(handler, **invocation.arguments)
                 return ToolResult(text_result_for_llm=json.dumps(result))
             except (OSError, ValueError, RuntimeError, TypeError, KeyError) as error:
@@ -273,10 +288,12 @@ async def run_agent(engine):
                     handler=invoke, skip_permission=True, is_terminal=terminal)
 
     tools = [
-        tool("list_source", "List a source directory", {"directory": {"type": "string"}}, [],
+        tool("list_source", "List a relative source directory; use '.' for root",
+             {"directory": {"type": "string", "default": "."}}, [],
              engine.list_source),
         tool("inspect_source", "Read source with line numbers", {
-            "path": {"type": "string"}, "start": {"type": "integer"}, "count": {"type": "integer"}},
+            "path": {"type": "string"}, "start": {"type": "integer", "minimum": 1, "default": 1},
+            "count": {"type": "integer", "minimum": 1, "maximum": 200, "default": 120}},
              ["path"], engine.inspect_source),
         tool("search_source", "Find literal text in source; returns up to 40 line citations", {
             "text": {"type": "string"}, "directory": {"type": "string"}},
@@ -308,9 +325,11 @@ async def run_agent(engine):
                 enable_host_git_operations=False, skip_custom_instructions=True,
                 mcp_servers={}, custom_agents=[], enable_session_telemetry=False,
             ) as session:
-                await session.send_and_wait(
+                response = await session.send_and_wait(
                     "Build this source for the observed handheld and analyze its controller support.\n"
                     + json.dumps(engine.profile), timeout=2100)
+                if response is not None:
+                    engine.record("agent_summary", content=getattr(response.data, "content", ""))
     if not (engine.output / "package" / "quiver-agent-report.json").is_file():
         raise RuntimeError("The reasoning agent stopped without a validated package. See agent-report.jsonl.")
 

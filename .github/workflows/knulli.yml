@@ -103,10 +103,12 @@ jobs:
           python -m pip install -r tools/knulli/agent/requirements.txt
           python -m copilot download-runtime
       - name: Reason about build failures and controller support
+        shell: bash
         env:
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
           TARGET_PROFILE: ${{ inputs.target_profile }}
         run: |
+          set -o pipefail
           mkdir -p attempt-output
           python tools/knulli/agent/build_agent.py 2>&1 | tee attempt-output/build.log
       - name: Upload build report
