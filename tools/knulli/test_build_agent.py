@@ -26,6 +26,7 @@ class AgentTests(unittest.TestCase):
         self.output = root / "output"
         self.source.mkdir()
         (self.source / "input.c").write_text("SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_A);\n")
+        (self.source / "LICENSE").write_text("Fixture license notice\n")
         self.report = {"api": "sdl2-gamecontroller", "support": "native", "notes": "Uses normalized SDL2 buttons.",
                        "evidence": [{"path": "input.c", "line": 1, "quote": "SDL_GameControllerGetButton"}]}
 
@@ -66,6 +67,8 @@ class AgentTests(unittest.TestCase):
         self.assertFalse(report["runtime_verified"])
         self.assertFalse(report["controller"]["runtime_verified"])
         self.assertTrue((self.output / "package" / "quiver-agent-report.json").is_file())
+        self.assertEqual((self.output / "package" / "source-licenses" / "LICENSE").read_text(),
+                         "Fixture license notice\n")
 
     def test_wrong_architecture_is_not_success(self):
         def runner(directory):
@@ -114,6 +117,15 @@ class AgentTests(unittest.TestCase):
             self.assertFalse(engine.attempt_build("make", "game", self.report)["success"])
         with self.assertRaisesRegex(RuntimeError, "exhausted"):
             engine.attempt_build("make", "game", self.report)
+
+    def test_inspection_budget_leaves_room_for_build_and_resets_after_feedback(self):
+        engine = agent.BuildAgent(self.source, self.output, {}, self.successful_build)
+        for _ in range(20):
+            engine.list_source()
+        with self.assertRaisesRegex(RuntimeError, "Call attempt_build now"):
+            engine.list_source()
+        self.assertTrue(engine.attempt_build("make", "game", self.report)["success"])
+        self.assertIn("input.c", engine.list_source())
 
     def test_container_has_no_network_credentials_or_writable_recipe(self):
         engine = agent.BuildAgent(self.source, self.output, {})

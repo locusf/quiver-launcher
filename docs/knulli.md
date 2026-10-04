@@ -134,7 +134,8 @@ The agent can:
 5. Publish only after an ARM64 ELF entrypoint and portable package pass checks.
 
 The loop permits five build attempts, six minutes per compiler run, 60 tool calls,
-and 35 minutes of agent time inside the 40-minute job. It starts with ARM64
+at most 20 source inspections before each compiler attempt, and 35 minutes of
+agent time inside the 40-minute job. It starts with ARM64
 compilers and common SDL2, OpenGL/EGL, image, audio, and compression libraries.
 Missing dependencies can still require updating the toolchain; the agent cannot
 install arbitrary network dependencies from within a source build.
@@ -161,6 +162,12 @@ GameController indices from physical Joystick indices, and cite actual source
 lines. It must never label compilation as device or controller verification.
 Both `runtime_verified` fields are enforced as `false` until separate device
 testing occurs.
+
+The Julius verification run used this reasoning path without a game-specific
+recipe: it identified the upstream Linux joystick-mode guard, enabled the
+existing controller implementation, compiled ARM64 code and preserved the
+observed RG CubeXX mappings. This proves agent-driven source adaptation and
+packaging, not complete Caesar III gameplay; original game data remains required.
 
 `device_profile.py` reads hardware metadata and the current Knulli SDL mapping
 database, not button events or arbitrary environment variables. It exports no

@@ -2,7 +2,7 @@
   "Repository": "locusf/quiver-launcher",
   "Ref": "agents/knulli-quiver-launcher-setup",
   "AttemptUnconfiguredGames": true,
-  "BuildRevision": 3,
+  "BuildRevision": 4,
   "Recipes": [
     {
       "Id": "2048",

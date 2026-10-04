@@ -213,14 +213,22 @@ class BuildAgent:
         if package.exists():
             raise RuntimeError("An output package already exists.")
         validate_package(directory / "files" / "package", entrypoint)
-        shutil.copytree(directory / "files" / "package", package)
         report = {
             "builder": "copilot-agent", "attempts": len(self.attempts),
             "entrypoint": entrypoint, "controller": controller,
             "device_profile": self.profile, "summary": summary, "runtime_verified": False,
         }
-        (package / "quiver-agent-report.json").write_text(json.dumps(report, indent=2))
-        (package / "quiver-build-recipe.txt").write_text((directory / "recipe" / "build.sh").read_text())
+        with tempfile.TemporaryDirectory(prefix="publish-", dir=self.output) as temporary:
+            prepared = Path(temporary) / "package"
+            shutil.copytree(directory / "files" / "package", prepared)
+            licenses = prepared / "source-licenses"
+            licenses.mkdir(exist_ok=True)
+            for path in self.source.iterdir():
+                if not path.is_symlink() and path.is_file() and path.name.upper().startswith(("COPYING", "LICENSE", "NOTICE")):
+                    shutil.copy2(path, licenses / path.name)
+            (prepared / "quiver-agent-report.json").write_text(json.dumps(report, indent=2))
+            (prepared / "quiver-build-recipe.txt").write_text((directory / "recipe" / "build.sh").read_text())
+            prepared.rename(package)
         self.record("completed", **report)
         return report
 
