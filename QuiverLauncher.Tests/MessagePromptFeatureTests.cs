@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
 using Avalonia.Threading;
@@ -28,11 +29,13 @@ public class MessagePromptFeatureTests
             var cancel = view.FindControl<Button>("MessagePromptNoButton")!;
             cancel.Content.Should().Be("Cancel");
             cancel.IsFocused.Should().BeTrue();
+            cancel.Classes.Should().Contain("gamepad-focused");
             view.Model.Body.Should().Be(text);
             var scroll = view.FindControl<ScrollViewer>("MessagePromptScroll")!;
             view.Navigate(NavigationDirection.Down).Should().BeTrue();
             scroll.Offset.Y.Should().BeGreaterThan(0);
             cancel.IsFocused.Should().BeTrue();
+            cancel.Classes.Should().Contain("gamepad-focused");
             view.Confirm();
             (await answer).Should().Be(MessagePromptResult.No);
 
@@ -41,16 +44,75 @@ public class MessagePromptFeatureTests
                 acceptLabel: "Accept & build", rejectLabel: "Cancel", scrollBody: true);
             Dispatcher.UIThread.RunJobs();
             cancel.IsFocused.Should().BeTrue();
-            view.FindControl<Button>("MessagePromptYesButton")!.Content.Should().Be("Accept & build");
+            var accept = view.FindControl<Button>("MessagePromptYesButton")!;
+            accept.Content.Should().Be("Accept & build");
+            view.FindControl<TextBlock>("MessagePromptNavigationHint")!.IsVisible.Should().BeTrue();
             view.Navigate(NavigationDirection.Left);
+            accept.Classes.Should().Contain("gamepad-focused");
+            cancel.Classes.Should().NotContain("gamepad-focused");
             view.Confirm();
             (await acceptance).Should().Be(MessagePromptResult.Yes);
+            accept.Classes.Should().NotContain("gamepad-focused");
             var ordinary = view.ShowAsync("Ordinary question", "Confirm", true);
             view.Model.AcceptLabel.Should().Be("Yes");
             view.Model.RejectLabel.Should().Be("No");
             view.Model.ScrollBody.Should().BeFalse();
+            Dispatcher.UIThread.RunJobs();
+            view.FindControl<TextBlock>("MessagePromptNavigationHint")!.IsVisible.Should().BeFalse();
             view.Cancel();
             (await ordinary).Should().Be(MessagePromptResult.No);
+        }
+        finally { window.Close(); await session.DisposeAsync(); }
+    }
+
+    [AvaloniaFact]
+    public async Task Long_license_keeps_actions_and_navigation_hint_inside_small_viewport()
+    {
+        var session = new LauncherSession();
+        var view = new MessagePromptView();
+        view.Configure(session);
+        var window = new Window { Content = view, Width = 360, Height = 360 };
+        try
+        {
+            window.Show();
+            var answer = view.ShowAsync(string.Join("\n", Enumerable.Repeat("Read these license terms.", 100)),
+                "License acceptance (2 of 2)", true, preferCancelDefault: true,
+                acceptLabel: "Accept & build", rejectLabel: "Cancel", scrollBody: true);
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            foreach (var name in new[] { "MessagePromptYesButton", "MessagePromptNoButton", "MessagePromptNavigationHint" })
+            {
+                var control = view.FindControl<Control>(name)!;
+                var origin = control.TranslatePoint(default, view)!.Value;
+                origin.Y.Should().BeGreaterThanOrEqualTo(0);
+                (origin.Y + control.Bounds.Height).Should().BeLessThanOrEqualTo(view.Bounds.Height);
+                origin.X.Should().BeGreaterThanOrEqualTo(0);
+                (origin.X + control.Bounds.Width).Should().BeLessThanOrEqualTo(view.Bounds.Width, name);
+            }
+            var scroll = view.FindControl<ScrollViewer>("MessagePromptScroll")!;
+            scroll.Extent.Height.Should().BeGreaterThan(scroll.Viewport.Height);
+            view.Cancel();
+            (await answer).Should().Be(MessagePromptResult.No);
+        }
+        finally { window.Close(); await session.DisposeAsync(); }
+    }
+
+    [AvaloniaFact]
+    public async Task Normal_short_prompts_remain_compact()
+    {
+        var session = new LauncherSession();
+        var view = new MessagePromptView();
+        view.Configure(session);
+        var window = new Window { Content = view, Width = 720, Height = 720 };
+        try
+        {
+            window.Show();
+            var answer = view.ShowAsync("Continue?", "Confirm", true);
+            Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            view.FindControl<Border>("MessagePromptCard")!.Bounds.Height.Should().BeLessThan(250);
+            view.Cancel();
+            (await answer).Should().Be(MessagePromptResult.No);
         }
         finally { window.Close(); await session.DisposeAsync(); }
     }

@@ -21,11 +21,11 @@ public static class GameDialogService
         {
             var view = TryGetMainView()
                 ?? throw new InvalidOperationException("The launcher license-review UI is unavailable.");
-            if (!await view.ShowOverlayPromptAsync(review.ReviewMessage, "Review source license",
+            if (!await view.ShowOverlayPromptAsync(review.ReviewMessage, "Review source license (1 of 2)",
                     isQuestion: true, preferCancelDefault: true,
                     acceptLabel: "Continue", rejectLabel: "Cancel", scrollBody: true))
                 return false;
-            return await view.ShowOverlayPromptAsync(review.AcceptanceMessage, "License acceptance",
+            return await view.ShowOverlayPromptAsync(review.AcceptanceMessage, "License acceptance (2 of 2)",
                 isQuestion: true, preferCancelDefault: true,
                 acceptLabel: "Accept & build", rejectLabel: "Cancel", scrollBody: true);
         });

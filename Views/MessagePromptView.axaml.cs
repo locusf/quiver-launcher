@@ -20,6 +20,7 @@ public partial class MessagePromptView : UserControl, IFeatureNavigationHandler
         InitializeComponent();
         DataContext = Model;
         Model.Opened += FocusPrompt;
+        AddHandler(InputElement.GotFocusEvent, Prompt_GotFocus, RoutingStrategies.Bubble);
     }
 
     public void Configure(LauncherSession session) => _session = session;
@@ -29,6 +30,7 @@ public partial class MessagePromptView : UserControl, IFeatureNavigationHandler
         _previousFocus = TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() as Control;
         var target = !Model.IsQuestion ? MessagePromptOkButton : preferCancel ? MessagePromptNoButton : MessagePromptYesButton;
         _index = Controls().IndexOf(target);
+        UpdateSelectionHighlight();
         if (!target.Focus())
         {
             Dispatcher.UIThread.Post(() =>
@@ -44,19 +46,46 @@ public partial class MessagePromptView : UserControl, IFeatureNavigationHandler
     {
         if (!Dispatcher.UIThread.CheckAccess())
             return await Dispatcher.UIThread.InvokeAsync(() => ShowAsync(message, title, isQuestion, preferCancelDefault, includeCancel, acceptLabel, rejectLabel, scrollBody));
-        return await Model.ShowAsync(message, title, isQuestion, preferCancelDefault, includeCancel, _session.Token, acceptLabel, rejectLabel, scrollBody);
+        try
+        {
+            return await Model.ShowAsync(message, title, isQuestion, preferCancelDefault, includeCancel, _session.Token, acceptLabel, rejectLabel, scrollBody);
+        }
+        finally
+        {
+            if (!Model.IsOpen)
+                UpdateSelectionHighlight();
+        }
     }
 
-    private List<Control> Controls() => new Control[]
+    // Visibility bindings may not have updated yet when a prompt opens.
+    private List<Control> Controls() => !Model.IsQuestion ? [MessagePromptOkButton] :
+        Model.IncludeCancel ? [MessagePromptYesButton, MessagePromptNoButton, MessagePromptCancelButton] :
+        [MessagePromptYesButton, MessagePromptNoButton];
+
+    private void UpdateSelectionHighlight()
     {
-        MessagePromptYesButton,
-        MessagePromptNoButton,
-        MessagePromptCancelButton,
-        MessagePromptOkButton
-    }.Where(c => c.IsVisible).ToList();
+        var controls = Controls();
+        var selected = controls[Math.Clamp(_index, 0, controls.Count - 1)];
+        foreach (var button in new[] { MessagePromptYesButton, MessagePromptNoButton, MessagePromptCancelButton, MessagePromptOkButton })
+            button.Classes.Set(GamepadFocusChrome.FocusedClassName,
+                Model.IsOpen && (Model.ScrollBody || GamepadFocusChrome.IsActive) && ReferenceEquals(button, selected));
+    }
+
+    private void Prompt_GotFocus(object? sender, FocusChangedEventArgs e)
+    {
+        if (!Model.IsOpen)
+            return;
+        var index = GamepadControlActivation.IndexOfControlContainingFocus(Controls(), e.Source);
+        if (index < 0)
+            return;
+        _index = index;
+        UpdateSelectionHighlight();
+    }
+
     public void Complete(MessagePromptResult result)
     {
         Model.Complete(result);
+        UpdateSelectionHighlight();
         var previous = _previousFocus;
         _previousFocus = null;
         if (!_session.IsClosed && previous?.IsEffectivelyVisible == true && previous.IsEnabled && TopLevel.GetTopLevel(previous) != null)
@@ -89,6 +118,7 @@ public partial class MessagePromptView : UserControl, IFeatureNavigationHandler
             _index = focused;
         var delta = direction is NavigationDirection.Left or NavigationDirection.Up ? -1 : 1;
         _index = Math.Clamp(_index + delta, 0, controls.Count - 1);
+        UpdateSelectionHighlight();
         controls[_index].Focus();
         return true;
     }
@@ -109,7 +139,10 @@ public partial class MessagePromptView : UserControl, IFeatureNavigationHandler
     {
         var controls = Controls();
         if (Model.IsOpen && controls.Count > 0)
+        {
+            UpdateSelectionHighlight();
             controls[Math.Clamp(_index, 0, controls.Count - 1)].Focus();
+        }
     }
 
     private void MessagePromptYesButton_Click(object? sender, RoutedEventArgs e) => Complete(MessagePromptResult.Yes);

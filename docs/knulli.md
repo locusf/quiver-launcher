@@ -85,7 +85,11 @@ license opens a two-step GUI:
    that your intended use, PUBLIC fork, modified-source pushes and downloadable
    artifacts are permitted. Only **Accept & build** authorizes the request.
 
-Both steps default to Cancel. Back/Escape, closing Quiver, or declining does not
+Both steps default to Cancel, with the selected button outlined. The numbered
+steps keep the action buttons and navigation hint outside the scrolling text.
+Use Left to select Continue on step 1, then Left to select Accept & build on
+step 2; use your configured Confirm button to activate the selected action.
+Back/Escape, closing Quiver, or declining does not
 dispatch a build. No automatic acceptance is performed by the agent or CLI.
 Each build request/retry requires a new review for an unrecognized license;
 acceptance is not a global or permanent allowlist.

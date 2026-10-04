@@ -11,7 +11,8 @@ public sealed class MessagePromptViewModel : ObservableViewModel
     private string _acceptLabel = "Yes", _rejectLabel = "No";
     public string AcceptLabel { get => _acceptLabel; private set => Set(ref _acceptLabel, value); }
     public string RejectLabel { get => _rejectLabel; private set => Set(ref _rejectLabel, value); }
-    public bool ScrollBody { get; private set; }
+    private bool _scrollBody;
+    public bool ScrollBody { get => _scrollBody; private set => Set(ref _scrollBody, value); }
     public string Title { get => _title; private set => Set(ref _title, value); }
     public string Body { get => _body; private set => Set(ref _body, value); }
     public bool IsOpen { get => _isOpen; private set => Set(ref _isOpen, value); }
