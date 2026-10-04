@@ -123,9 +123,14 @@ public static class GameDownloadInstallService
                 game.IsInstallIndeterminate = true;
                 try
                 {
+                    var recipe = fallback.Recipe;
+                    var sourceOnly = latestRelease.tag_name.StartsWith($"knulli-{recipe.Id}-", StringComparison.Ordinal);
+                    if (recipe.Id == "auto" && !sourceOnly)
+                        recipe = recipe with { SourceRef = latestRelease.tag_name };
                     buildArtifact = await fallback.Service.BuildAsync(
-                        fallback.Recipe, LauncherSession.OperationCancellation).ConfigureAwait(false);
-                    latestRelease = fallback.Recipe.Release;
+                        recipe, LauncherSession.OperationCancellation).ConfigureAwait(false);
+                    if (sourceOnly)
+                        latestRelease = (recipe with { SourceRef = buildArtifact.SourceRef }).Release;
                     asset = new GitHubAsset
                     {
                         name = $"knulli-{fallback.Recipe.Id}-arm64.zip",
@@ -168,6 +173,7 @@ public static class GameDownloadInstallService
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) &&
                 !OperatingSystem.IsAndroid() &&
+                !KnulliRuntime.IsEnabled &&
                 PlatformAssetMatcher.IsWindowsAsset(asset.name))
             {
                 var gamePathForRunner = game.GetInstallPath(gamesFolder);
@@ -204,10 +210,10 @@ public static class GameDownloadInstallService
             try
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get, asset.browser_download_url);
-                if (buildArtifact != null)
-                    build!.Value.Service.AuthenticateArtifactRequest(request);
-                using var downloadResponse = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead)
-                    .ConfigureAwait(false);
+                using var downloadResponse = buildArtifact != null
+                    ? await build!.Value.Service.DownloadArtifactAsync(buildArtifact, LauncherSession.OperationCancellation)
+                        .ConfigureAwait(false)
+                    : await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
                 downloadResponse.EnsureSuccessStatusCode();
 
                 var dispositionFileName =
@@ -344,6 +350,15 @@ public static class GameDownloadInstallService
                 }
 
                 AppFilesToAddService.Sync(gamePath, previous: null, game.FilesToAdd);
+                if (buildArtifact != null)
+                    await File.WriteAllTextAsync(Path.Combine(gamePath, "knulli-build.json"),
+                        System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            Repository = game.Repository,
+                            buildArtifact.SourceRef,
+                            buildArtifact.Sha256,
+                            ArtifactUrl = buildArtifact.Url
+                        })).ConfigureAwait(false);
 
                 game.DownloadProgress = 100;
                 await Task.Delay(500).ConfigureAwait(false);

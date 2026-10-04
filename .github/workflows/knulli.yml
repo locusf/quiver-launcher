@@ -11,11 +11,14 @@ on:
       recipe:
         description: Package to build
         type: choice
-        options: [launcher, '2048']
+        options: [launcher, '2048', auto]
         default: launcher
         required: true
       source_ref:
-        description: Full source commit (2048 only)
+        description: Full game source commit
+        type: string
+      source_repository:
+        description: Public GitHub owner/repository (auto recipe)
         type: string
       request_id:
         description: Launcher correlation ID
@@ -51,6 +54,57 @@ jobs:
         with:
           name: QuiverLauncher-knulli-arm64
           path: QuiverLauncher-knulli-arm64.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+  attempt-game:
+    if: github.event_name == 'workflow_dispatch' && inputs.recipe == 'auto'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - name: Validate dispatch inputs
+        env:
+          SOURCE_REPOSITORY: ${{ inputs.source_repository }}
+          SOURCE_REF: ${{ inputs.source_ref }}
+          REQUEST_ID: ${{ inputs.request_id }}
+        run: |
+          [[ "$SOURCE_REPOSITORY" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]
+          [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$REQUEST_ID" =~ ^[0-9a-f]{32}$ ]]
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.source_repository }}
+          ref: ${{ inputs.source_ref }}
+          submodules: recursive
+          path: game-source
+          persist-credentials: false
+      - name: Prepare isolated cross compiler
+        run: docker build -t quiver-knulli-cross tools/knulli/cross
+      - name: Attempt ARM64 build and package
+        run: |
+          mkdir -p attempt-output
+          chmod 777 attempt-output
+          docker run --rm --network none --cap-drop ALL \
+            --security-opt no-new-privileges --pids-limit 256 \
+            --memory 5g --cpus 2 --user "$(id -u):$(id -g)" \
+            -v "$PWD/game-source:/source:ro" \
+            -v "$PWD/attempt-output:/output" \
+            quiver-knulli-cross 2>&1 | tee attempt-output/build.log
+      - name: Upload build report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: knulli-auto-report-${{ inputs.request_id }}
+          path: attempt-output/build.log
+          if-no-files-found: warn
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: knulli-auto-${{ inputs.request_id }}
+          path: attempt-output/package/
           if-no-files-found: error
           retention-days: 30
 

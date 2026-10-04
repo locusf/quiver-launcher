@@ -81,8 +81,9 @@ MyFolder/
 **Knulli (ARM64 handhelds)**
 
 The RG CubeXX/H700 framebuffer build runs from the Ports menu without X11 or an
-AppImage runtime. It can dispatch supported, pinned game build recipes to GitHub
-Actions when no native ARM64 package is available. See [Knulli setup](docs/knulli.md)
+AppImage runtime. It can dispatch pinned game recipes or opt-in best-effort
+cross-build attempts to GitHub Actions when no native ARM64 package is available.
+See [Knulli setup](docs/knulli.md)
 for installation, authentication, supported recipes, and limitations.
 
 **macOS**

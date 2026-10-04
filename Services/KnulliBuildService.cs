@@ -15,11 +15,15 @@ public sealed record KnulliBuildRecipe(string Id, string Repository, string Sour
     public GitHubRelease Release => new() { tag_name = Version, assets = [] };
 }
 
-public sealed record KnulliBuildConfiguration(string Repository, string Ref, KnulliBuildRecipe[] Recipes)
+public sealed record KnulliBuildConfiguration(string Repository, string Ref, KnulliBuildRecipe[] Recipes,
+    bool AttemptUnconfiguredGames = false)
 {
+    public static bool IsRepository(string? value) => Regex.IsMatch(value ?? "",
+        @"\A[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*\z");
+
     public void Validate()
     {
-        if (!Regex.IsMatch(Repository ?? "", @"\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\z") ||
+        if (!IsRepository(Repository) ||
             string.IsNullOrWhiteSpace(Ref) || Recipes is null)
             throw new InvalidDataException("Invalid Knulli build repository, ref, or recipes.");
         foreach (var recipe in Recipes)
@@ -31,7 +35,7 @@ public sealed record KnulliBuildConfiguration(string Repository, string Ref, Knu
     }
 }
 
-public sealed record KnulliBuildArtifact(string Url, string Sha256);
+public sealed record KnulliBuildArtifact(string Url, string Sha256, string SourceRef);
 
 public sealed class KnulliBuildService(HttpClient httpClient, KnulliBuildConfiguration configuration,
     string token, string stateDirectory)
@@ -52,6 +56,9 @@ public sealed class KnulliBuildService(HttpClient httpClient, KnulliBuildConfigu
         config.Validate();
         var recipe = config.Recipes.SingleOrDefault(r =>
             string.Equals(r.Repository, game.Repository, StringComparison.OrdinalIgnoreCase));
+        if (recipe is null && config.AttemptUnconfiguredGames && KnulliBuildConfiguration.IsRepository(game.Repository))
+            recipe = new KnulliBuildRecipe("auto", game.Repository!,
+                string.IsNullOrWhiteSpace(game.PreferredVersion) ? "HEAD" : game.PreferredVersion);
         if (recipe is null)
             return null;
         var tokenPath = Path.Combine(QuiverLauncherPaths.UserDataRoot, "github-token");
@@ -66,7 +73,9 @@ public sealed class KnulliBuildService(HttpClient httpClient, KnulliBuildConfigu
         CancellationToken cancellationToken = default)
     {
         configuration.Validate();
-        if (!configuration.Recipes.Contains(recipe))
+        var automatic = recipe.Id == "auto" && configuration.AttemptUnconfiguredGames &&
+            KnulliBuildConfiguration.IsRepository(recipe.Repository);
+        if (!configuration.Recipes.Contains(recipe) && !automatic)
             throw new InvalidOperationException("The requested recipe is not configured.");
         if (string.IsNullOrWhiteSpace(token))
             throw new InvalidOperationException(
@@ -79,9 +88,23 @@ public sealed class KnulliBuildService(HttpClient httpClient, KnulliBuildConfigu
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(TimeSpan.FromMinutes(45));
             var ct = timeout.Token;
+            if (automatic)
+            {
+                using var sourceRequest = new HttpRequestMessage(HttpMethod.Get,
+                    $"https://api.github.com/repos/{recipe.Repository}/commits/{Uri.EscapeDataString(recipe.SourceRef)}");
+                Authenticate(sourceRequest);
+                using var sourceResponse = await httpClient.SendAsync(sourceRequest, ct);
+                sourceResponse.EnsureSuccessStatusCode();
+                using var source = await JsonDocument.ParseAsync(
+                    await sourceResponse.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+                var sha = source.RootElement.GetProperty("sha").GetString() ?? "";
+                if (!Regex.IsMatch(sha, @"\A[0-9a-f]{40}\z"))
+                    throw new InvalidDataException("GitHub did not resolve the game source to a full commit.");
+                recipe = recipe with { SourceRef = sha };
+            }
             Directory.CreateDirectory(stateDirectory);
             var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-                $"{configuration.Repository}\n{configuration.Ref}\n{recipe.Id}\n{recipe.SourceRef}")));
+                $"{configuration.Repository}\n{configuration.Ref}\n{recipe.Id}\n{recipe.Repository}\n{recipe.SourceRef}")));
             var statePath = Path.Combine(stateDirectory, key + ".json");
             PendingBuild pending;
             if (File.Exists(statePath))
@@ -94,7 +117,8 @@ public sealed class KnulliBuildService(HttpClient httpClient, KnulliBuildConfigu
                 request.Content = JsonContent.Create(new
                 {
                     @ref = configuration.Ref,
-                    inputs = new { recipe = recipe.Id, source_ref = recipe.SourceRef, request_id = pending.RequestId }
+                    inputs = new { recipe = recipe.Id, source_ref = recipe.SourceRef,
+                        source_repository = recipe.Repository, request_id = pending.RequestId }
                 });
                 using var response = await httpClient.SendAsync(request, ct);
                 response.EnsureSuccessStatusCode();
@@ -155,7 +179,7 @@ public sealed class KnulliBuildService(HttpClient httpClient, KnulliBuildConfigu
                         throw new InvalidDataException("GitHub did not provide a valid SHA-256 artifact digest.");
                     return new KnulliBuildArtifact(
                         $"https://api.github.com/repos/{configuration.Repository}/actions/artifacts/{artifact.GetProperty("id").GetInt64()}/zip",
-                        digest["sha256:".Length..]);
+                        digest["sha256:".Length..], recipe.SourceRef);
                 }
                 if (!runId.HasValue && DateTimeOffset.UtcNow - pending.CreatedAt > TimeSpan.FromMinutes(5))
                 {
@@ -177,6 +201,25 @@ public sealed class KnulliBuildService(HttpClient httpClient, KnulliBuildConfigu
         if (request.RequestUri is null || !request.RequestUri.AbsoluteUri.StartsWith(prefix, StringComparison.Ordinal))
             throw new InvalidOperationException("Refusing to send build credentials to a non-artifact URL.");
         Authenticate(request);
+    }
+
+    public async Task<HttpResponseMessage> DownloadArtifactAsync(KnulliBuildArtifact artifact, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, artifact.Url);
+        AuthenticateArtifactRequest(request);
+        var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (response.StatusCode != System.Net.HttpStatusCode.Found)
+            return response;
+
+        // ReleaseApiTransport deliberately disables redirects for api.github.com.
+        var location = response.Headers.Location;
+        response.Dispose();
+        if (location is not { IsAbsoluteUri: true, Scheme: "https", UserInfo.Length: 0 } ||
+            !(location.Host.EndsWith(".blob.core.windows.net", StringComparison.OrdinalIgnoreCase) ||
+              location.Host.EndsWith(".githubusercontent.com", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidDataException("GitHub returned an unexpected artifact download location.");
+        using var download = new HttpRequestMessage(HttpMethod.Get, location);
+        return await httpClient.SendAsync(download, HttpCompletionOption.ResponseHeadersRead, ct);
     }
 
     private HttpRequestMessage CreateRequest(HttpMethod method, string path)

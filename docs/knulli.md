@@ -59,6 +59,10 @@ repository you control and `Ref` to the branch containing
 New workflow registration may require a push run or the workflow on the default
 branch before GitHub permits dispatch.
 
+The example enables `AttemptUnconfiguredGames`. Set it to `false` to permit only
+explicit recipes. With it enabled, other GitHub games automatically get a
+best-effort cross-build attempt when they have no native ARM64 download.
+
 Configure a fine-grained GitHub token restricted to that repository with
 **Actions: read and write** and **Contents: read**. Put it in **Settings >
 Advanced > GitHub API Token**, set `QUIVER_GITHUB_TOKEN` in the launch environment,
@@ -82,6 +86,10 @@ Add an app named `2048` with repository `libretro/libretro-2048` and folder name
 4. Downloads the matching Actions artifact using authenticated requests.
 5. Verifies GitHub's SHA-256 digest before using the normal game installer.
 
+GitHub artifact redirects are followed without forwarding the API token to
+artifact storage. A `knulli-build.json` receipt records the source commit,
+artifact URL and checksum in the installed game's directory.
+
 The device does not compile games. The `2048` job uses an ARM64 cross compiler on
 an x64 GitHub runner, with the H700 flags from Knulli's `configs/knulli-h700.board`:
 `-mcpu=cortex-a53 -mtune=cortex-a53 -fsigned-char`. It includes the source's license
@@ -92,11 +100,36 @@ An expired artifact or failed run is reported; retrying starts a fresh build.
 Closing Quiver cancels local waiting, not the remote GitHub job. Reopening and
 retrying resumes that request.
 
+## Best-effort builds without recipes
+
+For an unconfigured GitHub game, Quiver resolves the selected release tag
+(or `HEAD` for projects without releases) to a full commit, then dispatches the
+`auto` job. The generic builder tries CMake, Meson, Autotools/configure, or Make.
+It uses ARM64 compilers and common SDL2, OpenGL/EGL, image, audio, and compression
+development libraries. Projects with a single nested CMake project are supported.
+
+The source build runs as an unprivileged user in a disposable container with no
+network, GitHub credentials, Docker socket, or host filesystem access beyond its
+read-only source and output directory. CPU, memory, process count, and job time
+are limited. Submodules are fetched before the isolated build. Build systems
+that download more dependencies during compilation will fail with a log rather
+than receive unrestricted network access.
+
+Packaging uses the project's install target, checks that there is exactly one
+ARM64 executable (not an x64 tool or shared library), preserves installed data,
+copies top-level license notices, and generates a portable launch script.
+Ambiguous executables, missing install rules, dependencies, or compiler errors
+are reported in Actions, with a `knulli-auto-report-<request-id>` artifact. A
+successful compile is **not** a guarantee of runtime compatibility: graphics,
+dynamic libraries, hard-coded paths and game data still need device testing.
+The build log explicitly makes that distinction.
+
 ## Limits
 
-- Arbitrary catalog games are **not** automatically portable. New games need a
-  reviewed recipe, dependencies/sysroot, packaging, and device testing. Extend
-  both configuration validation and workflow jobs when adding one.
+- Unconfigured GitHub games are attempted, not guaranteed. Unsupported build
+  systems, Rust/.NET engines, private repositories, GitLab sources and commercial
+  game data need further integration or a specific recipe. Improve the generic
+  builder or add a reviewed recipe based on its failure report.
 - A Linux ARM64 archive is a candidate, not proof of framebuffer compatibility.
   Games requiring X11/Wayland or a different GPU stack still need a port.
 - Windows, generic architecture-unknown Linux, AppImage, and Flatpak downloads

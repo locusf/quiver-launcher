@@ -11,7 +11,7 @@ public static class KnulliAssetPolicy
         var assets = GitHubReleaseService.GetDownloadableAssets(release, filter)
             .Where(a => IsCompatible(a.name)).ToArray();
         return new(assets, [], assets.Length == 0
-            ? "No native Knulli ARM64 package is available. A configured build recipe is required to build from source."
+            ? "No native Knulli ARM64 package is available. Enable source-build attempts or configure a build recipe."
             : null);
     }
 

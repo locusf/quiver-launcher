@@ -1,7 +1,11 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text.Json;
 using FluentAssertions;
+using QuiverLauncher.Core.Models;
+using QuiverLauncher.Models;
 using QuiverLauncher.Services;
 
 namespace QuiverLauncher.Tests;
@@ -24,6 +28,104 @@ public sealed class KnulliBuildTests : IDisposable
     [InlineData("game-linux-arm64-sources.zip", false)]
     public void Only_explicit_native_arm64_archives_are_eligible(string name, bool expected) =>
         KnulliAssetPolicy.IsCompatible(name).Should().Be(expected);
+
+    [Fact]
+    public async Task Generic_attempt_resolves_source_commit_before_dispatch()
+    {
+        var handler = new BuildHandler { RecipeId = "auto" };
+        using var client = new HttpClient(handler);
+        var service = new KnulliBuildService(client,
+            Configuration with { AttemptUnconfiguredGames = true }, "test-token", _state);
+        var artifact = await service.BuildAsync(new KnulliBuildRecipe("auto", "owner/game", "v1.2"));
+        artifact.SourceRef.Should().Be(new string('c', 40));
+        handler.SourceRef.Should().Be(artifact.SourceRef);
+        handler.SourceRepository.Should().Be("owner/game");
+    }
+
+    [Fact]
+    public async Task Generic_attempt_is_opt_in()
+    {
+        using var client = new HttpClient(new BuildHandler());
+        var service = new KnulliBuildService(client, Configuration, "test-token", _state);
+        await service.Invoking(s => s.BuildAsync(new KnulliBuildRecipe("auto", "owner/game", "HEAD")))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*not configured*");
+    }
+
+    [Fact]
+    public async Task Artifact_redirect_does_not_forward_github_credentials()
+    {
+        var handler = new RedirectHandler();
+        using var client = new HttpClient(handler);
+        var service = new KnulliBuildService(client, Configuration, "test-token", _state);
+        using var response = await service.DownloadArtifactAsync(
+            new KnulliBuildArtifact("https://api.github.com/repos/owner/builds/actions/artifacts/42/zip", "", ""),
+            TestContext.Current.CancellationToken);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        handler.Downloaded.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Verified_build_uses_normal_installer_and_records_pinned_version()
+    {
+        await VerifyInstallationAsync(corruptDigest: false);
+    }
+
+    [Fact]
+    public async Task Corrupt_build_never_reaches_the_installer()
+    {
+        await VerifyInstallationAsync(corruptDigest: true);
+    }
+
+    private async Task VerifyInstallationAsync(bool corruptDigest)
+    {
+        if (!OperatingSystem.IsLinux())
+            return;
+        var previousRoot = QuiverLauncherPaths.OverrideUserDataRoot;
+        var previousMode = Environment.GetEnvironmentVariable("QUIVER_KNULLI");
+        try
+        {
+            QuiverLauncherPaths.OverrideUserDataRoot = _state;
+            Environment.SetEnvironmentVariable("QUIVER_KNULLI", "1");
+            Directory.CreateDirectory(_state);
+            await File.WriteAllTextAsync(Path.Combine(_state, "knulli-builds.json"), JsonSerializer.Serialize(Configuration));
+            using var archiveBytes = new MemoryStream();
+            using (var zip = new ZipArchive(archiveBytes, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                await using var writer = new StreamWriter(zip.CreateEntry("launch.sh").Open());
+                await writer.WriteAsync("#!/bin/sh\nexit 0\n");
+            }
+            var payload = archiveBytes.ToArray();
+            using var client = new HttpClient(new BuildHandler
+            {
+                Payload = payload,
+                Digest = "sha256:" + (corruptDigest ? new string('0', 64) :
+                    Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant())
+            });
+            var game = new GameInfo { Name = "2048", Repository = Recipe.Repository, FolderName = "2048" };
+            var dialogs = new TestDialogs();
+            await GameDownloadInstallService.DownloadAndInstallAsync(game, client,
+                Path.Combine(_state, "Apps"), Recipe.Release,
+                new AppSettings { GitHubApiToken = "test-token" }, GameStatus.NotInstalled, dialogs);
+            var versionPath = Path.Combine(_state, "Apps", "2048", "version.txt");
+            if (corruptDigest)
+            {
+                dialogs.Error.Should().Contain("SHA-256");
+                File.Exists(versionPath).Should().BeFalse();
+                game.Status.Should().Be(GameStatus.NotInstalled);
+            }
+            else
+            {
+                dialogs.Error.Should().BeNull();
+                (await File.ReadAllTextAsync(versionPath)).Trim().Should().Be(Recipe.Version);
+                game.Status.Should().Be(GameStatus.Installed);
+            }
+        }
+        finally
+        {
+            QuiverLauncherPaths.OverrideUserDataRoot = previousRoot;
+            Environment.SetEnvironmentVariable("QUIVER_KNULLI", previousMode);
+        }
+    }
 
     [Fact]
     public void Handoff_preserves_argument_boundaries_without_build_credentials()
@@ -159,10 +261,13 @@ public sealed class KnulliBuildTests : IDisposable
         public int AuthorizedRequests { get; private set; }
         public string? DispatchedRef { get; private set; }
         public string? SourceRef { get; private set; }
+        public string? SourceRepository { get; private set; }
+        public string RecipeId { get; init; } = "2048";
         public string Conclusion { get; init; } = "success";
         public bool Expired { get; init; }
         public string? Digest { get; init; } = "sha256:" + new string('b', 64);
         public HttpStatusCode DispatchStatus { get; init; } = HttpStatusCode.NoContent;
+        public byte[] Payload { get; init; } = [];
         private string? _requestId;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
@@ -170,12 +275,15 @@ public sealed class KnulliBuildTests : IDisposable
             request.Headers.Authorization?.ToString().Should().Be("Bearer test-token");
             AuthorizedRequests++;
             var path = request.RequestUri!.AbsolutePath;
+            if (path == "/repos/owner/game/commits/v1.2")
+                return Json(new { sha = new string('c', 40) });
             if (request.Method == HttpMethod.Post)
             {
                 path.Should().EndWith("/actions/workflows/knulli.yml/dispatches");
                 var body = await request.Content!.ReadFromJsonAsync<JsonElement>(ct);
                 DispatchedRef = body.GetProperty("ref").GetString();
                 SourceRef = body.GetProperty("inputs").GetProperty("source_ref").GetString();
+                SourceRepository = body.GetProperty("inputs").GetProperty("source_repository").GetString();
                 _requestId = body.GetProperty("inputs").GetProperty("request_id").GetString();
                 Dispatches++;
                 return new HttpResponseMessage(DispatchStatus);
@@ -191,12 +299,14 @@ public sealed class KnulliBuildTests : IDisposable
                     }
                 });
             }
+            if (path.EndsWith("/actions/artifacts/42/zip"))
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Payload) };
             path.Should().EndWith("/actions/runs/17/artifacts");
             return Json(new
             {
                 artifacts = new[]
                 {
-                    new { id = 42, name = $"knulli-2048-{_requestId}", expired = Expired, digest = Digest }
+                    new { id = 42, name = $"knulli-{RecipeId}-{_requestId}", expired = Expired, digest = Digest }
                 }
             });
         }
@@ -205,5 +315,34 @@ public sealed class KnulliBuildTests : IDisposable
         {
             Content = JsonContent.Create(value)
         };
+    }
+
+    private sealed class RedirectHandler : HttpMessageHandler
+    {
+        public bool Downloaded { get; private set; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            if (request.RequestUri!.Host == "api.github.com")
+            {
+                request.Headers.Authorization?.Parameter.Should().Be("test-token");
+                var response = new HttpResponseMessage(HttpStatusCode.Found);
+                response.Headers.Location = new Uri("https://build.blob.core.windows.net/artifact.zip?signature=test");
+                return Task.FromResult(response);
+            }
+            request.Headers.Authorization.Should().BeNull();
+            Downloaded = true;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }
+    }
+
+    private sealed class TestDialogs : IGameDownloadDialogs
+    {
+        public string? Error { get; private set; }
+        public Task ShowErrorAsync(string message, string title) { Error = message; return Task.CompletedTask; }
+        public Task<bool> ConfirmDownloadWithoutRunnerAsync() => throw new NotSupportedException();
+        public Task<LinuxWindowsRunnerConfig?> ConfigureWindowsRunnerAsync(string gamePath,
+            LinuxWindowsRunnerConfig? existing = null, bool isInstall = true) => throw new NotSupportedException();
+        public Task ShowRateLimitExceededAsync() => throw new NotSupportedException();
+        public Task ShowGitLabRateLimitExceededAsync() => throw new NotSupportedException();
     }
 }
