@@ -14,6 +14,7 @@ RUN dpkg --add-architecture arm64 \
        libsdl2-dev:arm64 libsdl2-image-dev:arm64 libsdl2-mixer-dev:arm64 \
        libsdl2-ttf-dev:arm64 libfreetype6-dev:arm64 libpng-dev:arm64 \
        libjpeg-dev:arm64 libopenal-dev:arm64 libvorbis-dev:arm64 libogg-dev:arm64 \
+       libboost-locale-dev:arm64 libboost-program-options-dev:arm64 libboost-date-time-dev:arm64 \
        libcurl4-openssl-dev:arm64 zlib1g-dev:arm64 libgl-dev:arm64 libegl-dev:arm64
 COPY aarch64.cmake aarch64.ini build.py /opt/cross/
 ENV CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++ AR=aarch64-linux-gnu-ar

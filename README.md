@@ -85,6 +85,9 @@ AppImage runtime. It can dispatch pinned game recipes or a Copilot reasoning
 agent for unknown games when no native ARM64 package is available. The agent
 inspects build errors and the handheld's controller profile; GitHub supplies
 the isolated build compute and artifacts.
+For recognized open-source projects, source fixes and diagnostics are checkpointed
+to a dedicated fork branch. Exhausted tool budgets start fresh reasoning rounds
+from that checkpoint rather than discarding progress.
 See [Knulli setup](docs/knulli.md)
 for installation, authentication, supported recipes, and limitations.
 

@@ -270,6 +270,83 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         profile = {"schema": 1, "architecture": "aarch64", "display": {}, "controllers": []}
         self.assertEqual(agent.load_target_profile(json.dumps(profile)), profile)
 
+    def test_source_fix_is_persistent_and_invalidates_previous_build(self):
+        engine = agent.BuildAgent(self.source, self.output, {}, self.successful_build)
+        engine.attempt_build("make", "game", self.report)
+        engine.edit_source("input.c", "int input_enabled = 1;", "int input_enabled = 2;")
+        self.assertIn("input_enabled = 2", (self.source / "input.c").read_text())
+        self.assertIsNone(engine.result)
+        self.assertFalse(engine.last_outcome["success"])
+        with self.assertRaisesRegex(RuntimeError, "No validated build"):
+            engine.finish("Done")
+
+    def test_compiler_timeout_cannot_outlive_the_shared_round_deadline(self):
+        engine = agent.BuildAgent(self.source, self.output, {})
+        engine.deadline = agent.time.monotonic() + 10
+        directory = self.output / "attempt-1"
+        directory.mkdir()
+        with patch.object(agent.subprocess, "run") as run:
+            run.return_value.returncode = 1
+            engine.run_container(directory)
+        self.assertGreater(run.call_args.kwargs["timeout"], 0)
+        self.assertLessEqual(run.call_args.kwargs["timeout"], 10)
+
+    async def test_tool_budget_pushes_fork_then_starts_fresh_round_with_context(self):
+        checkpoints = []
+        store = SimpleNamespace(state=None, repository="builder/game", branch="quiver/test",
+                                ensure_fork=lambda: None, restore=lambda: None)
+
+        def checkpoint(engine, status):
+            checkpoints.append((engine.round_number, status, engine.calls))
+            store.state = {"round": engine.round_number, "summary": engine.last_summary,
+                           "last_build": engine.last_outcome}
+            return {"repository": store.repository, "branch": store.branch,
+                    "commit": str(engine.round_number), "url": "https://github.com/builder/game/tree/quiver/test"}
+
+        store.checkpoint = checkpoint
+        deadlines = []
+
+        async def run_round(engine):
+            deadlines.append(engine.deadline)
+            if engine.round_number == 1:
+                engine.add_source("config.h", "#define KNULLI 1\n")
+                engine.last_summary = "Added missing generated configuration."
+                engine.last_outcome = {"success": False, "error": "config.h missing in old build"}
+                engine.calls = agent.MAX_TOOL_CALLS
+                raise agent.ToolBudgetExhausted("exhausted")
+            self.assertEqual(engine.calls, 0)
+            self.assertIn("missing generated configuration", engine.continuation["summary"])
+            self.assertTrue((engine.source / "config.h").is_file())
+            engine.runner = self.successful_build
+            engine.attempt_build("make with config", "game", self.report)
+            engine.finish("Compiled using the saved configuration fix.")
+
+        await agent.run_fork_rounds(self.source, self.output, {}, store, run_round)
+        self.assertEqual([item[1] for item in checkpoints], ["tool-budget-exhausted", "compiled-unverified"])
+        self.assertEqual(deadlines[0], deadlines[1])
+        report = json.loads((self.output / "package" / "quiver-agent-report.json").read_text())
+        self.assertEqual(report["fork"]["commit"], "2")
+        self.assertEqual(report["round"], 2)
+
+    async def test_fork_continuation_rounds_are_bounded_and_progress_is_saved(self):
+        checkpoints = []
+        store = SimpleNamespace(state={"round": 8}, repository="builder/game", branch="quiver/test",
+                                ensure_fork=lambda: {"round": 8}, restore=lambda: None)
+
+        def checkpoint(engine, status):
+            checkpoints.append(engine.round_number)
+            store.state = {"round": engine.round_number}
+            return {"url": "https://github.com/builder/game/tree/quiver/test"}
+
+        store.checkpoint = checkpoint
+
+        async def run_round(engine):
+            raise agent.ToolBudgetExhausted("exhausted")
+
+        with self.assertRaisesRegex(RuntimeError, "Three agent rounds exhausted"):
+            await agent.run_fork_rounds(self.source, self.output, {}, store, run_round)
+        self.assertEqual(checkpoints, [9, 10, 11])
+
 
 if __name__ == "__main__":
     unittest.main()

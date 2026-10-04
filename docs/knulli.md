@@ -124,6 +124,12 @@ Agent runs may consume Copilot usage. A missing/unauthorized credential fails
 explicitly; there is no silent fallback to the old scripted builder. The pinned
 SDK and its verified runtime are installed only on the runner, not on Knulli.
 
+Also configure **`QUIVER_FORK_TOKEN`** for the GitHub account that will own game
+forks. It needs permission to create forks, write their contents, and disable
+Actions on newly created forks (a classic `repo` token supports these operations).
+The trusted checkpoint manager uses this credential; it is removed from the
+reasoning process's environment and is never passed to build containers or tools.
+
 The agent can:
 
 1. List, search, and read the pinned game's source using constrained tools.
@@ -133,9 +139,10 @@ The agent can:
 4. Compile in isolation, read the actual errors, and revise its recipe.
 5. Publish only after an ARM64 ELF entrypoint and portable package pass checks.
 
-The loop permits five build attempts, six minutes per compiler run, 60 tool calls,
-at most 20 source inspections before each compiler attempt, and 35 minutes of
-agent time inside the 40-minute job. It starts with ARM64
+Each agent round permits five build attempts, six minutes per compiler run,
+60 tool calls, and at most 20 source inspections before each compiler attempt.
+Up to three fresh rounds share a single 35-minute deadline inside the 40-minute
+job. Compiler timeouts are capped by that shared deadline. It starts with ARM64
 compilers and common SDL2, OpenGL/EGL, image, audio, and compression libraries.
 Missing dependencies can still require updating the toolchain; the agent cannot
 install arbitrary network dependencies from within a source build.
@@ -145,6 +152,41 @@ resumes reasoning in the same session with the last build error, compiler log,
 tool error and remaining budgets. Up to six reasoning turns are allowed; they
 share the original build/tool budgets and overall deadline. A validated compile
 still needs `finish` to publish; an agent summary alone is never success.
+
+When a round exhausts its tool budget, the checkpoint manager pushes source edits,
+the latest recipe, compiler diagnostics and the agent's summary to a fork, then
+creates a **new Copilot session with a fresh per-round budget**. The next session
+receives those diagnostics and reads the already-patched source. After three
+rounds, the job stops with the saved fork URL; a new build request resumes that
+same checkpoint. The deadline is never reset within a job.
+
+### Forks and source fixes
+
+Forks are created on demand only for public projects with recognized open-source
+licenses. An unknown license requires manual verification; it is not assumed to
+grant redistribution rights. No fork is created in the upstream owner's account.
+An existing repository with the same name must belong to the same fork network.
+
+Build branches use `quiver/knulli/<source-commit>-<device-profile-hash>`. Upstream
+and default branches are untouched, pushes are never forced, and concurrent
+changes stop the checkpoint rather than overwrite another writer. Builds for the
+same upstream revision are serialized. Actions is disabled on a newly created
+game fork so pushing source cannot execute its workflows. Existing forks with
+Actions enabled must be explicitly disabled before this automation can use them.
+
+The agent uses restricted `edit_source` and `add_source` tools to make persistent
+fixes. Hidden paths (including workflows, Git configuration and submodule metadata),
+symlink paths and license notices cannot be changed. Source changes invalidate
+any previous compile validation. Temporary edits made only inside a build
+container are not source fixes; reusable build flags and packaging remain in the
+saved recipe.
+
+The reserved `.quiver-agent/knulli/` directory records checkpoint status, the
+original source commit, device fingerprint, last errors and recipe. A checkpoint
+marked `tool-budget-exhausted` or `blocked` is **work in progress**, not a working
+port. Even `compiled-unverified` still requires gameplay/controller testing.
+Validated packages include the fork repository, branch and exact checkpoint
+commit in their agent report.
 
 A missing hardware profile is not a compiler failure and cannot be repaired by
 the model. It is rejected before source checkout, toolchain setup or agent
@@ -161,7 +203,9 @@ than receive unrestricted network access.
 
 The Copilot session exposes no built-in shell, filesystem, MCP, SSH or subagent
 tools. Repository instructions are not loaded. Only the custom bounded tools
-can inspect source or invoke the container. Game code receives no AI/GitHub token.
+can inspect/edit permitted source files or invoke the container. GitHub writes
+are performed by the separate checkpoint manager, never by model commands.
+Game code receives no AI/GitHub token.
 Recipe inputs and runner logs are outside the container's writable output mount.
 Special files and symlinks in generated packages are rejected.
 
@@ -174,7 +218,8 @@ input and the explicit lack of device verification. Controller analysis must
 identify native/adapted/unsupported input, distinguish normalized SDL
 GameController indices from physical Joystick indices, and cite actual source
 lines. Native/adapted claims require separate citations and explanations for
-initialization/platform guards and the selected binding table, not just event
+initialization/platform guards and the selected binding table in the current
+fork source, not just event
 handlers or the existence of a joystick. It must never label compilation as
 device or controller verification.
 Both `runtime_verified` fields are enforced as `false` until separate device

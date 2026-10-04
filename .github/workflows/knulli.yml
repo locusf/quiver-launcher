@@ -65,13 +65,21 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.recipe == 'auto'
     runs-on: ubuntu-22.04
     timeout-minutes: 40
+    concurrency:
+      group: knulli-agent-${{ inputs.source_repository }}-${{ inputs.source_ref }}
+      cancel-in-progress: false
     steps:
       - name: Require reasoning credentials
         env:
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          QUIVER_FORK_TOKEN: ${{ secrets.QUIVER_FORK_TOKEN }}
         run: |
           if [ -z "$COPILOT_GITHUB_TOKEN" ]; then
             echo "::error::Configure COPILOT_GITHUB_TOKEN with an authorized Copilot-enabled account. Unknown games now require the reasoning agent; there is no silent scripted fallback."
+            exit 1
+          fi
+          if [ -z "$QUIVER_FORK_TOKEN" ]; then
+            echo "::error::Configure QUIVER_FORK_TOKEN with permission to create forks, push source checkpoints and disable Actions on new forks."
             exit 1
           fi
       - name: Validate dispatch inputs
@@ -111,6 +119,9 @@ jobs:
         env:
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
           TARGET_PROFILE: ${{ inputs.target_profile }}
+          QUIVER_FORK_TOKEN: ${{ secrets.QUIVER_FORK_TOKEN }}
+          SOURCE_REPOSITORY: ${{ inputs.source_repository }}
+          SOURCE_REF: ${{ inputs.source_ref }}
         run: |
           set -o pipefail
           mkdir -p attempt-output
@@ -126,6 +137,9 @@ jobs:
             attempt-output/agent-error.txt
             attempt-output/attempt-*/build.log
             attempt-output/attempt-*/recipe/*
+            attempt-output/round-*/agent-report.jsonl
+            attempt-output/round-*/attempt-*/build.log
+            attempt-output/round-*/attempt-*/recipe/*
           if-no-files-found: warn
           retention-days: 30
       - uses: actions/upload-artifact@v4
